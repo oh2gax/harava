@@ -20,6 +20,7 @@ It runs on your own computer (open, no sign-in) or on a server behind nginx with
 - [Updating on a server](#updating-on-a-server)
 - [Pages](#pages)
 - [Phone app](#phone-app)
+- [Imports, phones and whose data](#imports-phones-and-whose-data)
 - [Identification database](#identification-database)
 - [Workbench (admins)](#workbench-admins)
 - [Log and Sit: collect with both](#log-and-sit-collect-with-both)
@@ -38,7 +39,9 @@ It runs on your own computer (open, no sign-in) or on a server behind nginx with
 
 ## Features
 
-- **Import** Fieldwatch log and Sit exports (CSV, JSON lines, KML) by drag and drop or from a folder; files already imported are skipped. Fieldwatch's own KML files, which Google Earth refuses because of hidden Wi-Fi names, load fine.
+- **Import without duplicates** — drop all Fieldwatch log and Sit exports at once (CSV, JSON lines, KML, or a .zip): every hear is stored once per phone, so the overlapping rolling-log exports add only what is new, and each file tells what it brought (new · extends · overlaps · duplicate · sit update). Coverage bars, Re-read from kept originals. Fieldwatch's own KML files, which Google Earth refuses because of hidden Wi-Fi names, load fine.
+- **Any range of days** — one day, part of a day, or several days at once.
+- **Everyone's own data** — on a server each user's imports are their own; share an import with all or chosen users; admins see and combine everything.
 - **Map** — the phone's path and one pin per radio at the place where it was heard loudest; icon pins for glasses, trackers, surveillance, police, drones and hacking tools; a pulsing ring for a tracker separated from its owner.
 - **Timeline** of hears and new radios per 10 minutes, also for one kind of device (e.g. *Glasses & VR only*).
 - **Device layers** — one per Fieldwatch signature class, grouped as Watch list, Personal, Places & things and Background.
@@ -215,6 +218,7 @@ Open `https://harava.oh2gax.org`, sign in with the admin of step 6, add users on
 
 ### Backups and removing
 
+- `archive/` keeps a compressed copy of every uploaded export (for *Re-read*); it is not in git and not in the update backups (your exports are the originals).
 - The data that matters on the server: `harava.db` (imports, My devices, Workbench notes), `harava_users.db` (users), `ids/local_rules.json` (rules made in the Workbench), `config.ini`, `api_keys.py` and `.harava_secret` (the key that signs the sign-in cookies). `update.sh` copies both databases and the local rules to `~/harava_backups/` before every update; copy them off the server now and then (`scp`).
 - To remove Harava completely: `sudo systemctl disable --now harava`, `sudo rm /etc/systemd/system/harava.service /etc/nginx/sites-enabled/harava.oh2gax.org /etc/nginx/sites-available/harava.oh2gax.org`, `sudo nginx -t && sudo systemctl reload nginx`, `sudo certbot delete --cert-name harava.oh2gax.org`, and delete `~/harava`.
 
@@ -285,11 +289,11 @@ It shows the new commits and changed files and asks `Update to <hash>? [y/N]`. A
 | **Devices** | Sortable table of all radios with filters and CSV export. Tags mark *travelled*, *separated* trackers, *sit only*, *N addr.* (one device, many addresses) and Ruuvi temperatures. **＋** marks a radio as one of *My devices*. |
 | **Phone check** | The classroom phone-box check (below). |
 | **🔎 Identification** | How much Harava's own database identifies, which rules matched, and the most common advertisements that are still unknown. |
-| **Imports** | Drop files, or press **Scan folder** to read every new `.csv` / `.jsonl` / `.kml` in `data/` (sub-folders included). Each file can be switched off or deleted. |
+| **Imports** | Drop files or a .zip (or **Scan folder**: every new `.csv` / `.jsonl` / `.kml` in `data/`, oldest first). Each file shows its owner and phone, what it brought, what it covers and whom it is shared with; switch it off, share, re-read or delete it. Coverage bars over time. |
 | **🔬 Workbench** | Radios Harava cannot name yet, a status and note for each kind, and rules made on the spot (admins only; `/workbench`). |
 | **⚙️ Maintenance** | Users, permissions and the sign-in log (admins only; a separate page at `/maintenance`). |
 
-Sidebar filters: day and time window; Wi-Fi or Bluetooth; minimum RSSI; *Identified as* (one kind of identified device, grouped by layer); *Travelled with me* (the same address ≥ 500 m apart, in two or more places); *Named or identified only*; *Heard only in Sit*; *Group same device*; *Hide my devices*.
+Sidebar: *Whose data* (your own, shared with you, one user's, or everyone's for admins); day, *Until* (a range of days) and time window; filters: Wi-Fi or Bluetooth; minimum RSSI; *Identified as* (one kind of identified device, grouped by layer); *Travelled with me* (the same address ≥ 500 m apart, in two or more places); *Named or identified only*; *Heard only in Sit*; *Group same device*; *Hide my devices*.
 
 ### Device layers
 
@@ -320,6 +324,28 @@ Every device class in Fieldwatch's signature catalogue is its own map layer, wit
 | **Workbench** | admins only: the unknown radios, their status and notes, and rules |
 
 It uses the same sign-in, permissions and data as the full site, and *Mask addresses* (in ☰ → General) works there too. Add it to the home screen (Chrome: ⋮ → *Add to Home screen*; Safari: Share → *Add to Home Screen*) and it opens without the browser bars. Back on the phone closes the menu or a window, or goes to the previous view. When the server gets a new version, or after an hour in the background, the app reloads itself. The Harava Mobile app User Guide (*User guides*) has the details.
+
+## Imports, phones and whose data
+
+**Why exports overlap.** Fieldwatch keeps its log on the phone as 12 rotating parts of about 1 MB, and a log export (CSV or JSON lines) copies *everything still on the phone* — there is no time range. Exports made on different days therefore repeat each other; a Wi-Fi-only export is part of a full one; a later export of a running Sit contains the earlier one.
+
+**One hear, stored once.** Harava keeps every hear once per *phone* (the time, kind, address and signal make a log row the same row in another export) and links each import to the hears it contained. So you can drop every export you have, in any order:
+
+| Result | Meaning |
+|--------|---------|
+| **new** | nothing of the file was stored yet |
+| **extends** | a newer export of the rolling log: N rows already stored, M new from a time on |
+| **overlaps** | partly known, partly new |
+| **duplicate** | every row was already stored (a Wi-Fi-only export, the same log as JSON lines …) |
+| **sit update** | a newer export of the same running Sit: its radios are updated, not counted twice |
+
+A repeated row keeps the richer value (the JSON lines export has the full raw data; the CSV cuts it). The very same file again is skipped. A KML has one point per radio, so a KML of the same phone and time as a log or Sit is switched off. *Delete* removes an import and only the rows no other import contains. *Re-read* reads the kept original (`archive/<user>/<sha1>.<ext>.gz`, `keep_originals = true`) again. The **coverage** bars on the Imports page show every import over time; a click analyses its days. **Until** under *Day* analyses several days at once.
+
+**Phones.** Choose the phone (*Phone*, **＋** adds one) before importing. Two phones that hear the same radio stay two observations, and the radio gets an **N phones** tag.
+
+**Whose data.** Every import belongs to the user who imported it. *Whose data* (sidebar and phone app) chooses what all pages show: *My data + shared with me* (default), *My data only*, one user's data, or *All users* (admins). The owner shares an import with all users or chosen users (*Share*); others can look but not switch, re-read or delete it. My devices are personal; the identification database and the Workbench are shared. Data imported before there were any users (the desktop) belongs to the first admin.
+
+**Upgrading.** The first start of this version converts an older `harava.db` by itself, in one transaction, keeping all imports, switches and paths. `update.sh --rollback` to an older version puts back the database copy made before the update.
 
 ## Identification database
 
@@ -398,6 +424,7 @@ Keep the window short (phones change their address about every 15 minutes), use 
 | `require_login` | `false` | `true`: refuse to start without users (use it on a server) |
 | `behind_proxy` | `false` | `true` behind nginx with HTTPS: trust `X-Forwarded-*`, HTTPS-only cookies |
 | `session_days` | `30` | how long *Keep me signed in* lasts |
+| `keep_originals` | `true` | keep a compressed copy of every uploaded export in `archive/` (for *Re-read*) |
 
 Command line: `python harava.py` (start), `--no-browser` (do not open a browser), `--add-admin` (add an admin or reset a password).
 
@@ -406,9 +433,10 @@ Command line: `python harava.py` (start), `--no-browser` (do not open a browser)
 *✨ What's new* under the name at the top left opens one window with three tabs, as in WSPR Logger: **What's new** (`doc/whats_new.md`; each `## v.DDMMYYYY — headline` is one day of development and the newest gives the version in the badge), **User guides** (the PDFs in `doc/`, described in `doc/guides.json`) and **About**. The guides:
 
 - `doc/Harava_User_Guide.pdf` — how to collect with Fieldwatch and read every part of the page.
-- `doc/Harava_Admin_Guide.pdf` — server installation, users and permissions, updating and backups.
+- `doc/Harava_Mobile_Guide.pdf` — the phone app at `/app`.
+- `doc/Harava_Admin_Guide.pdf` — server installation, users and their data, permissions, updating and backups.
 
-Both are built from `doc/src/*.tex` with `pdflatex` (three runs); their screenshots (taken with *Mask addresses*) are in `doc/src/guide_img/`. The technical history is in [CHANGELOG.md](CHANGELOG.md).
+All are built from `doc/src/*.tex` with `pdflatex` (three runs); their screenshots (taken with *Mask addresses*) are in `doc/src/guide_img/`. The technical history is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Project structure
 
@@ -442,7 +470,7 @@ api_keys.py.example       CARTO key template       (api_keys.py: local, not in g
 CHANGELOG.md              technical history
 ```
 
-Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data), `harava_users.db` (users), `.harava_secret` (cookie key), `ids/local_rules.json` (Workbench rules), `data/` (your Fieldwatch exports) and `tmp_files/`.
+Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data), `harava_users.db` (users), `.harava_secret` (cookie key), `ids/local_rules.json` (Workbench rules), `archive/` (kept originals), `data/` (your Fieldwatch exports) and `tmp_files/`.
 
 ## REST API
 
@@ -450,10 +478,14 @@ All routes need a sign-in once users exist (otherwise `401`), and the routes tha
 
 | Method | Route | Permission | What |
 |--------|-------|------------|------|
-| GET | `/api/summary`, `/api/devices`, `/api/path`, `/api/timeline`, `/api/device`, `/api/imports`, `/api/ids`, `/api/own` | View only | the data behind the pages (`?day=YYYY-MM-DD`, `from`, `to`) |
+| GET | `/api/summary`, `/api/devices`, `/api/path`, `/api/timeline`, `/api/device`, `/api/imports`, `/api/ids`, `/api/own` | View only | the data behind the pages (`from`, `to` in ms), limited to *Whose data* |
+| GET, POST | `/api/scope` | View only | the *Whose data* choices / choose one (`mine+shared`, `mine`, `u:<id>`, `all` for admins) |
+| GET | `/api/people` | View only | users to share with (names only) |
+| GET, POST | `/api/collectors` | View only / Analyze | your phones / add one (`{"name"}`) |
+| POST | `/api/imports/<id>/share`, `/api/imports/<id>/reread` | Analyze (owner or admin) | share (`{"shared": "*" \| [ids] \| ""}`), read the kept original again |
 | GET | `/api/export.csv` | View only | the Devices list as CSV |
-| POST | `/api/import` (multipart `files`), `/api/scan` | Analyze | import uploaded files / the watch folder |
-| POST, DELETE | `/api/imports/<id>/toggle`, `/api/imports/<id>` | Analyze | switch or delete an import |
+| POST | `/api/import` (multipart `files`, `.zip` too, optional `collector`), `/api/scan` | Analyze (scan: admin) | import uploaded files / the watch folder |
+| POST, DELETE | `/api/imports/<id>/toggle`, `/api/imports/<id>` | Analyze (owner or admin) | switch or delete an import |
 | POST, DELETE | `/api/own`, `/api/own/<id>` | Analyze | My devices rules |
 | POST | `/api/ids/reload` | Analyze | read the identification files again |
 | GET, POST, PUT, DELETE | `/api/users`, `/api/users/<id>`, `/api/users/<id>/password` | Admin | users |

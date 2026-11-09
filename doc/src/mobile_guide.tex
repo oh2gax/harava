@@ -53,7 +53,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava Mobile app --- what your phone heard, in your pocket}
-\fancyhead[R]{\small\itshape Mobile app user guide, version 1.0 --- November 2026}
+\fancyhead[R]{\small\itshape Mobile app user guide, version 1.1 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava Mobile app - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -81,7 +81,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.0 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.1 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava Mobile app}\par\vspace{5pt}
 {\large\bfseries The map, the day, the watch list, every radio, the phone check and uploads ---\\ on your phone, one view at a time}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -161,7 +161,8 @@ Admin & also use the Workbench (Section~\ref{sec:wb}), and open the full site's 
 
 The \ui{☰} menu (Figure~\ref{fig:screen}, middle) slides in from the left. From the top:
 \begin{enumerate}[leftmargin=1.4em]
-\item \textbf{Day} --- \ui{‹} and \ui{›} step one day back or forward; the list in the middle has every day with data, with its number of hears, and \emph{All days}. The day applies to every view except Imports and the Workbench.
+\item \textbf{Day} --- \ui{‹} and \ui{›} step one day back or forward; the list in the middle has every day with data, with its number of hears, and \emph{All days}. \ui{Until} makes it a range of several days (the steps then move the whole range). The day applies to every view except Imports and the Workbench.
+\item \textbf{Whose data} --- shown when there is more than your own: \emph{My data + shared with me} (the default), \emph{My data only}, one user's shared data, or for admins \emph{All users}. It is the same choice as on the full site.
 \item \textbf{The views} as tiles: Map, Day, Watch list, Devices, Phone check, Identification, Imports and, for admins, Workbench. The view on the screen is highlighted. A tap changes the view and closes the menu.
 \item \textbf{Options}, one folding section per view. The section of the view on the screen opens by itself and the others stay folded; tap a title to open or fold it. The \emph{Filter} section belongs to Map, Day, Watch list and Devices.
 \item \textbf{General} (Figure~\ref{fig:screen}, right): who is signed in and with which permission, the \ui{Mask addresses} switch (Section~\ref{sec:mask}), a short help, the newest data, and the buttons \ui{What's new}, \ui{About}, \ui{User guides}, \ui{My account} (change your password), \ui{Sign out}, and for admins \ui{Workbench (full site)} and \ui{Maintenance}. \ui{Full site ↗} opens the normal page.
@@ -298,13 +299,14 @@ Harava has its own identification database on top of Fieldwatch's signatures: th
 The phone that ran Fieldwatch can send its exports to Harava straight away (Analyze permission):
 \begin{enumerate}[leftmargin=1.3em]
 \item In Fieldwatch, export the log (CSV, JSON lines or KML) and, if you sat somewhere, the Sit. Fieldwatch saves them in \emph{Downloads}.
-\item In Harava, open \ui{Imports} and tap \ui{Choose files…}. Pick one or more files (a long press selects several).
-\item Harava uploads and imports them and tells, file by file, how many rows it read --- or why a file was skipped (\emph{already imported}) or refused.
+\item In Harava, open \ui{Imports}, check the \ui{Phone} (\ui{＋} adds one) and tap \ui{Choose files…}. Pick one or more files, or a \texttt{.zip} (a long press selects several). Older files are imported first.
+\item Harava tells, file by file, what it brought: \textbf{new}, \textbf{extends} (a newer export of the rolling log: most rows were already stored, ``+N'' new), \textbf{overlaps}, \textbf{duplicate} (nothing new) or \textbf{sit update} (a newer export of the same Sit) --- or why a file was skipped or refused.
 \end{enumerate}
-\textbf{Imported files} lists every import, newest first, with its type, rows and time span. The switch takes a file in or out of the analysis without deleting it; \ui{Delete} removes it from the database (you are asked first).\par\smallskip
-A log and a Sit export of the same time work together: the log gives the timeline, the Sit every radio. A KML of the same time as a log is switched off by itself, so radios are not counted twice.
+You can choose every export you have at once: Fieldwatch's log export always contains everything still on the phone, and Harava keeps every hear only once per phone.\par\smallskip
+\textbf{Coverage} draws every import as a bar over time (blue log, green Sit, violet KML, grey switched off); tap one to analyse its days.\par\smallskip
+\textbf{Imported files}: the switch takes a file in or out of the analysis; \ui{Re-read} reads the kept original again; \ui{Delete} removes it (rows another file also has stay). Under each of your own files, \emph{Private} / \emph{Shared with all users} chooses who else sees it (chosen users on the full site).
 \end{minipage}
-\caption{Imports.}\label{fig:imp}
+\caption{Imports: the phone, the upload, and the coverage of every import.}\label{fig:imp}
 \end{figure}
 
 % ─────────────────────────────────────────────────────────────────────
@@ -397,6 +399,9 @@ hide my own devices & a radio's page $\rightarrow$ \ui{＋ My device}; Filter $\
 see when glasses were near & Day $\rightarrow$ \ui{☰} $\rightarrow$ Day options $\rightarrow$ \ui{Timeline shows} \emph{Glasses \& VR}\\
 check the phone box & Phone check: window, \ui{Auto-calibrate}\\
 upload an export & Imports $\rightarrow$ \ui{Choose files…}\\
+look at several days & \ui{☰} $\rightarrow$ \ui{Until}\\
+see shared or (admins) everyone's data & \ui{☰} $\rightarrow$ \ui{Whose data}\\
+share an import & Imports $\rightarrow$ \emph{Shared with all users}\\
 name an unknown radio (admin) & Workbench $\rightarrow$ a row $\rightarrow$ \ui{Make a rule} $\rightarrow$ \ui{Preview} $\rightarrow$ \ui{Save rule}\\
 take a screenshot to share & General $\rightarrow$ \ui{Mask addresses}\\
 change the theme & the theme button at the top right\\

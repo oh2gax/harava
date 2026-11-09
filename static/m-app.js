@@ -75,7 +75,7 @@
   const saveO = () => lsSet('harava_app_opts', JSON.stringify(O));
 
   // the data of the chosen day; window.S is read by privacy.js (Mask addresses)
-  const S = { summary: null, days: [], day: lsGet('harava_app_day', ''), devices: [], hears: 0, path: [], own: [],
+  const S = { summary: null, days: [], day: lsGet('harava_app_day', ''), dayTo: '', scope: '', devices: [], hears: 0, path: [], own: [],
               loadedFor: null, sel: null, device: null };
   window.S = S;
 
@@ -221,13 +221,40 @@
   function rangeMs() {
     if (!S.day || S.day === 'all') return [null, null];
     const [y, m, d] = S.day.split('-').map(Number);
-    return [new Date(y, m - 1, d).getTime(), new Date(y, m - 1, d + 1).getTime()];
+    const [y2, m2, d2] = (S.dayTo && S.dayTo > S.day ? S.dayTo : S.day).split('-').map(Number);   // Until: several days
+    return [new Date(y, m - 1, d).getTime(), new Date(y2, m2 - 1, d2 + 1).getTime()];
   }
   function rangeQuery() { const [a, b] = rangeMs(); return (a ? `from=${a}` : '') + (b ? `&to=${b}` : ''); }
+  const shortDay = x => new Date(x + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   const dayLabel = () => (!S.day || S.day === 'all') ? 'All days'
+    : S.dayTo ? `${shortDay(S.day)} – ${shortDay(S.dayTo)} ${S.dayTo.slice(0, 4)}`
     : new Date(S.day + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const wide = () => S.day === 'all' || !!S.dayTo;
+  const whenTxt = t => wide() ? fmtTime(t, true).slice(5, 16).replace('-', '.').replace(' ', ' ') : fmtTime(t).slice(0, 5);
+
+  // whose data (the server keeps the choice in the session, shared with the full site)
+  async function loadScope() {
+    const r = await api('/api/scope');
+    S.scope = r.scope;
+    $('m-scope').innerHTML = r.options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+    $('m-scope').value = r.scope;
+    $('m-scope-row').hidden = r.options.length < 2;
+  }
+  $('m-scope').addEventListener('change', async e => {
+    try { await post('/api/scope', { scope: e.target.value }); } catch (err) { toast(err.message); }
+    S.scope = e.target.value; await loadSummary(); loadView(true);
+  });
+  function fillDayTo() {
+    const days = S.days.map(d => d.day).filter(d => S.day !== 'all' && d > S.day);
+    if (S.dayTo && !days.includes(S.dayTo)) S.dayTo = '';
+    $('m-day-to').innerHTML = '<option value="">— the same day —</option>' + days.map(d => `<option value="${d}">${d}</option>`).join('');
+    $('m-day-to').value = S.dayTo;
+    $('m-day-to').disabled = S.day === 'all' || !days.length;
+  }
+  $('m-day-to').addEventListener('change', e => { S.dayTo = e.target.value; $('app-sub').textContent = dayLabel(); loadView(true); });
 
   async function loadSummary() {
+    try { await loadScope(); } catch (_) { /* older server */ }
     S.summary = await api('/api/summary');
     S.days = S.summary.days || [];
     const sel = $('m-day');
@@ -235,10 +262,11 @@
       .map(d => `<option value="${d.day}">${d.day} · ${n0(d.hears)} hears</option>`).join('');
     if (S.day !== 'all' && !S.days.some(d => d.day === S.day)) S.day = S.days.length ? S.days[S.days.length - 1].day : 'all';
     sel.value = S.day;
+    fillDayTo();
     setHealth();
   }
   async function loadData(force) {
-    const key = S.day;
+    const key = `${S.day}|${S.dayTo}|${S.scope}`;
     if (!force && S.loadedFor === key) return;
     const q = rangeQuery();
     const [dv, pa, own] = await Promise.all([api('/api/devices?' + q), api('/api/path?' + q), api('/api/own')]);
@@ -249,6 +277,8 @@
   }
   function setDay(v) {
     S.day = v; lsSet('harava_app_day', v); $('m-day').value = v;
+    if (S.dayTo && (v === 'all' || S.dayTo <= v)) S.dayTo = '';
+    fillDayTo();
     $('app-sub').textContent = dayLabel();
     loadView(true);
   }
@@ -257,7 +287,9 @@
     const days = S.days.map(d => d.day);
     if (!days.length) return;
     let i = days.indexOf(S.day);
-    i = i < 0 ? days.length - 1 : Math.min(days.length - 1, Math.max(0, i + n));
+    const span = S.dayTo ? days.indexOf(S.dayTo) - i : 0;              // keep the length of a range of days
+    i = i < 0 ? days.length - 1 : Math.min(days.length - 1 - Math.max(0, span), Math.max(0, i + n));
+    S.dayTo = span > 0 ? days[i + span] : '';
     setDay(days[i]);
   }
   $('m-day-prev').addEventListener('click', () => stepDay(-1));
@@ -330,6 +362,7 @@
     if (d._n > 1) t.push(`<span class="tg">${d._n} addr.</span>`);
     if (d.tracker_mode === 'separated') t.push('<span class="tg red">separated</span>');
     if (d.travelled) t.push('<span class="tg amb">travelled</span>');
+    if (d.phones > 1) t.push(`<span class="tg">${d.phones} phones</span>`);
     if (d.vr) t.push('<span class="tg">VR?</span>');
     if (d.in_sit && !d.log_rows) t.push('<span class="tg">sit only</span>');
     if (d.sensor) t.push(`<span class="tg grn">${d.sensor.temp_c.toFixed(1)} °C</span>`);
@@ -341,7 +374,7 @@
     return `<div class="app-card m-dev${d.own ? ' own' : ''}"><button type="button" class="hd" data-k="${d.kind}" data-m="${esc(d.mac)}">
       <div class="l1"><span class="cdot" style="background:${CAT_COLORS[d.category] || '#94a3b8'}"></span><b>${CAT_ICON[d.category] ? CAT_ICON[d.category] + ' ' : ''}${esc(name)}</b>
         <span class="rssi">${d.rssi_max ?? '?'} dBm</span></div>
-      <div class="l2">${esc(d.category)}${what ? ' · ' + esc(what) : ''} · ${d.hears} hears · ${fmtTime(d.last).slice(0, 5)}</div>
+      <div class="l2">${esc(d.category)}${what ? ' · ' + esc(what) : ''} · ${d.hears} hears · ${whenTxt(d.last)}</div>
       <div class="l2"><span class="mono">${esc(d.mac)}</span> ${tagsOf(d)}${extra || ''}</div></button></div>`;
   }
   function bindRows(box) {
@@ -547,7 +580,7 @@
         <span>Vendor</span><b>${esc(d.vendor || '–')}</b>
         ${(d.group_size || 1) > 1 ? `<span>Same device</span><b>${d.group_size} addresses${d.group_name ? ' · ' + esc(d.group_name) : ''}</b>` : ''}
         ${d.sensor ? `<span>Sensor</span><b>${d.sensor.temp_c.toFixed(1)} °C · ${d.sensor.humidity.toFixed(0)} % · ${d.sensor.pressure_hpa} hPa · ${(d.sensor.battery_mv / 1000).toFixed(2)} V</b>` : ''}
-        <span>Hears</span><b>${d.hears}${d.in_sit ? ` (log ${d.log_rows} · Sit ${d.sit_hits})` : ''}</b>
+        <span>Hears</span><b>${d.hears}${d.in_sit ? ` (log ${d.log_rows} · Sit ${d.sit_hits})` : ''}${d.phones > 1 ? ` · by ${d.phones} phones` : ''}</b>
         <span>First / last</span><b>${fmtTime(d.first)} – ${fmtTime(d.last)}</b>
         <span>RSSI max / med</span><b>${d.rssi_max ?? '?'} / ${d.rssi_med ?? '?'} dBm</b>
         ${d.kind === 'WIFI' ? `<span>Channel</span><b>${esc(d.channel)} · ${d.freq} MHz</b>` : ''}
@@ -690,34 +723,85 @@
   }
 
   // ══ Imports ═════════════════════════════════════════════════════════════
+  async function loadPhones() {
+    if (!can('analyze')) return;
+    const r = await api('/api/collectors');
+    const sel = $('m-imp-phone'), cur = sel.value || lsGet('harava_phone', '');
+    sel.innerHTML = r.collectors.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+  }
+  $('m-imp-phone').addEventListener('change', e => lsSet('harava_phone', e.target.value));
+  $('m-imp-newphone').addEventListener('click', async () => {
+    const name = prompt('Name of the phone (for example "Pixel 8"):');
+    if (!name || !name.trim()) return;
+    try { const r = await post('/api/collectors', { name: name.trim() }); lsSet('harava_phone', String(r.id)); await loadPhones(); $('m-imp-phone').value = String(r.id); }
+    catch (e) { toast(e.message); }
+  });
+  const vTag = x => x.verdict ? `<span class="m-verdict-tag v-${x.verdict.split(' ')[0]}">${esc(x.verdict)}</span>` : '';
   $('m-imp-pick').addEventListener('click', () => $('m-imp-file').click());
   $('m-imp-file').addEventListener('change', async e => {
-    const files = [...e.target.files]; e.target.value = '';
+    const files = [...e.target.files].sort((a, b) => a.lastModified - b.lastModified); e.target.value = '';
     if (!files.length) return;
     const fd = new FormData(); files.forEach(f => fd.append('files', f));
+    if ($('m-imp-phone').value) fd.append('collector', $('m-imp-phone').value);
     $('m-imp-res').innerHTML = `<div class="skip">Uploading and importing ${files.length} file(s)…</div>`;
     try {
       const r = await api('/api/import', { method: 'POST', body: fd });
       $('m-imp-res').innerHTML = r.results.map(x => x.status === 'imported'
-        ? `<div class="ok">✔ ${esc(x.file)} — ${n0(x.rows)} rows${x.note ? ' (' + esc(x.note) + ')' : ''}</div>`
+        ? `<div class="ok">✔ ${esc(x.file)} — ${vTag(x)} ${n0(x.rows)} rows${x.verdict !== 'new' && x.verdict !== 'sit update' ? `, ${n0(x.new_rows)} new` : ''}${x.note ? ' (' + esc(x.note) + ')' : ''}</div>`
         : x.status === 'skipped' ? `<div class="skip">– ${esc(x.file)} — ${esc(x.reason)}</div>` : `<div class="err">✖ ${esc(x.file)} — ${esc(x.reason)}</div>`).join('');
       await loadSummary(); S.loadedFor = null; loadImports();
     } catch (err) { $('m-imp-res').innerHTML = `<div class="err">✖ ${esc(err.message)}</div>`; }
   });
+  let IMPS = [];
   async function loadImports() {
+    loadPhones().catch(() => {});
     const r = await api('/api/imports');
+    IMPS = r.imports;
+    const multi = new Set(r.imports.map(i => i.owner_name)).size > 1;
     $('m-imp-n').textContent = `${r.imports.length}`;
+    const ed = i => i.can_edit && can('analyze');
     $('m-imp-list').innerHTML = r.imports.map(i => `<div class="app-card m-imp">
-        <label class="app-switch"><input type="checkbox" data-id="${i.id}" ${i.active ? 'checked' : ''} ${can('analyze') ? '' : 'disabled'}></label>
-        <div class="t"><b>${esc(i.filename)}</b><small>${i.ftype.toUpperCase()} · ${n0(i.rows)} rows · ${i.first_ts ? fmtTime(i.first_ts, true).slice(0, 16) + ' → ' + fmtTime(i.last_ts, true).slice(11, 16) : ''}</small></div>
-        <button type="button" class="app-btn del needs-analyze" data-del="${i.id}" data-name="${esc(i.filename)}">Delete</button></div>`).join('')
+        <label class="app-switch"><input type="checkbox" data-id="${i.id}" ${i.active ? 'checked' : ''} ${ed(i) ? '' : 'disabled'}></label>
+        <div class="t"><b>${esc(i.filename)}</b>
+          <small>${vTag(i)} ${i.ftype.toUpperCase()} · ${n0(i.rows)} rows${i.verdict === 'extends' || i.verdict === 'overlaps' ? ` (+${n0(i.new_rows)})` : ''} · ${i.first_ts ? fmtTime(i.first_ts, true).slice(5, 16) + ' → ' + fmtTime(i.last_ts, true).slice(5, 16) : ''}</small>
+          <small>${multi || !i.mine ? esc(i.owner_name) + ' · ' : ''}${esc(i.phone)}${i.shared_with ? ' · shared: ' + esc(i.shared_with) : ''}</small>
+          ${i.note ? `<small style="color:var(--amber)">${esc(i.note)}</small>` : ''}
+          ${i.mine && ed(i) && !F.open ? `<select data-share="${i.id}" aria-label="Sharing"><option value="">Private</option><option value="*" ${i.shared_with === 'all users' ? 'selected' : ''}>Shared with all users</option>${i.shared_with && i.shared_with !== 'all users' ? '<option value="keep" selected>Shared with chosen users</option>' : ''}</select>` : ''}</div>
+        ${ed(i) ? `<div class="acts">${i.rereadable ? `<button type="button" class="app-btn" data-rr="${i.id}">Re-read</button>` : ''}<button type="button" class="app-btn del" data-del="${i.id}" data-name="${esc(i.filename)}">Delete</button></div>` : ''}</div>`).join('')
       || '<div class="m-empty">Nothing imported yet.</div>';
     $('m-imp-list').querySelectorAll('input[data-id]').forEach(cb => cb.addEventListener('change', async () => {
       try { await api(`/api/imports/${cb.dataset.id}/toggle`, { method: 'POST' }); S.loadedFor = null; await loadSummary(); loadImports(); } catch (e) { toast(e.message); }
     }));
+    $('m-imp-list').querySelectorAll('select[data-share]').forEach(sel => sel.addEventListener('change', async () => {
+      if (sel.value === 'keep') return;
+      try { await post(`/api/imports/${sel.dataset.share}/share`, { shared: sel.value }); toast(sel.value ? 'Shared with all users' : 'Private'); loadImports(); } catch (e) { toast(e.message); }
+    }));
+    $('m-imp-list').querySelectorAll('button[data-rr]').forEach(b => b.addEventListener('click', async () => {
+      try { const x = await post(`/api/imports/${b.dataset.rr}/reread`, {}); toast(`Read again: ${n0(x.rows)} rows, ${n0(x.new_rows)} new`); S.loadedFor = null; loadImports(); } catch (e) { toast(e.message); }
+    }));
     $('m-imp-list').querySelectorAll('button[data-del]').forEach(b => b.addEventListener('click', async () => {
-      if (!confirm(`Remove ${b.dataset.name} from the database?`)) return;
+      if (!confirm(`Remove ${b.dataset.name} from the database? Rows that another import also has stay.`)) return;
       try { await api(`/api/imports/${b.dataset.del}`, { method: 'DELETE' }); S.loadedFor = null; await loadSummary(); loadImports(); } catch (e) { toast(e.message); }
+    }));
+    drawCov(r.imports);
+  }
+  function drawCov(list) {
+    const xs = list.filter(i => i.first_ts && i.last_ts).sort((a, b) => a.first_ts - b.first_ts || a.id - b.id);
+    $('m-cov-card').hidden = !xs.length;
+    if (!xs.length) return;
+    const lo = Math.min(...xs.map(i => i.first_ts)), hi = Math.max(...xs.map(i => i.last_ts)), span = Math.max(1, hi - lo);
+    const ty = i => !i.active ? 't-off' : i.ftype === 'sit' ? 't-sit' : i.ftype === 'kml' ? 't-kml' : 't-log';
+    $('m-cov').innerHTML = xs.map(i => `<div class="m-cov-row" data-id="${i.id}"><small>${esc(i.filename)}</small>
+        <div class="m-cov-track"><div class="m-cov-bar ${ty(i)}${i.verdict === 'duplicate' ? ' dup' : ''}" style="left:${(100 * (i.first_ts - lo) / span).toFixed(2)}%;width:${(100 * (i.last_ts - i.first_ts) / span).toFixed(2)}%"></div></div></div>`).join('') +
+      `<div class="m-cov-axis"><span>${fmtTime(lo, true).slice(5, 16)}</span><span>${fmtTime(hi, true).slice(5, 16)}</span></div>`;
+    $('m-cov').querySelectorAll('.m-cov-row').forEach(row => row.addEventListener('click', () => {
+      const i = IMPS.find(x => x.id === +row.dataset.id); if (!i) return;
+      const d1 = fmtTime(i.first_ts, true).slice(0, 10), d2 = fmtTime(i.last_ts, true).slice(0, 10);
+      if (!S.days.some(d => d.day === d1)) { toast('That file is switched off or has no hears'); return; }
+      S.day = d1; lsSet('harava_app_day', d1); $('m-day').value = d1;
+      fillDayTo(); S.dayTo = d2 > d1 && S.days.some(d => d.day === d2) ? d2 : ''; $('m-day-to').value = S.dayTo;
+      setView('map');
     }));
   }
 

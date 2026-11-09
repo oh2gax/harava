@@ -214,6 +214,43 @@ restart_and_verify() {
   return 1
 }
 
+# --- database format: a newer Harava may convert harava.db; an older one cannot read it then --
+db_version() {
+  [ -s "$CFG_DB" ] || { echo 0; return; }
+  "$PY" - "$CFG_DB" <<'PY' 2>/dev/null || echo 0
+import sqlite3, sys
+print(sqlite3.connect(sys.argv[1], timeout=30).execute("PRAGMA user_version").fetchone()[0])
+PY
+}
+code_version() {
+  local v
+  v=$(grep -oE '^SCHEMA_VERSION = [0-9]+' harava.py 2>/dev/null | grep -oE '[0-9]+$')
+  echo "${v:-1}"
+}
+restore_older_database() {
+  # called after rolling the code back: put back the copy made before the update when the
+  # database is in a newer format than the older code knows
+  local dbv codev last name keep
+  dbv=$(db_version); codev=$(code_version)
+  [ "${dbv:-0}" -gt "${codev:-1}" ] || return 0
+  name=$(basename "$CFG_DB")
+  # shellcheck disable=SC2012
+  last=$(ls -1dt "$BACKUP_ROOT"/pre_update_* 2>/dev/null | head -1)
+  warn "the database was converted by the newer version (format $dbv); the older version reads format $codev"
+  if [ -z "$last" ] || [ ! -s "$last/$name" ]; then
+    warn "no copy from before the update was found - restore one by hand from $BACKUP_ROOT"
+    return 0
+  fi
+  say "Database: putting back the copy made before the update: $last/$name"
+  say "          (imports made after the update are not in it; the newer database is kept aside)"
+  sudo systemctl stop "$SERVICE" || warn "could not stop $SERVICE"
+  keep="$CFG_DB.newer-$(date +%Y%m%d_%H%M%S)"
+  cp -p -- "$CFG_DB" "$keep" && say "          newer database kept as $keep"
+  [ -f "$CFG_DB-wal" ] && cp -p -- "$CFG_DB-wal" "$keep-wal"
+  rm -f -- "$CFG_DB-wal" "$CFG_DB-shm"
+  cp -p -- "$last/$name" "$CFG_DB" || die "could not copy the database back - the copy is in $last"
+}
+
 do_rollback() {
   local prev cur keep cfgkeep
   [ -f "$BACKUP_ROOT/previous_commit" ] || die "no earlier version recorded - there is nothing to roll back to"
@@ -252,6 +289,7 @@ do_rollback() {
     say "Note    : update.sh is not part of the older version - your copy was put back"
   fi
   rm -f "$keep"
+  restore_older_database
   if restart_and_verify; then
     say
     say "Rolled back to $(git log -1 --date=iso --format='%h %ad  %s' HEAD) - OK"

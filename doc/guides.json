@@ -2,19 +2,19 @@
   {
     "file": "Harava_User_Guide.pdf",
     "title": "Harava – User guide",
-    "description": "How to collect with Fieldwatch so that nothing is missed (log and Sit), signing in and the three permissions, importing, and how to read the map, the timeline, the selected-radio panel, the device layers (Glasses & VR, Trackers, Vehicles …), the filters, the Devices page, Harava's own identification and My devices; the classroom Phone check step by step; Mask addresses for screenshots; what the data can and cannot tell, questions you can answer, limitations and a quick reference.",
+    "description": "How to collect with Fieldwatch so that nothing is missed (log and Sit), signing in and the three permissions, importing without duplicates (every hear once per phone, the result of each file, coverage), your own and shared data, ranges of several days, and how to read the map, the timeline, the selected-radio panel, the device layers (Glasses & VR, Trackers, Vehicles …), the filters, the Devices page, Harava's own identification and My devices; the classroom Phone check step by step; Mask addresses for screenshots; what the data can and cannot tell, questions you can answer, limitations and a quick reference.",
     "date": "2026-11-09"
   },
   {
     "file": "Harava_Mobile_Guide.pdf",
     "title": "Harava Mobile app – User guide",
-    "description": "The phone app at /app: opening it and adding it to the home screen, the top bar, the ☰ menu and the filter; the Map, Day and Watch list views; Devices and a radio's own page with ＋ My device; the Phone check and Identification; uploading Fieldwatch exports from the phone; the Workbench for admins (status and notes, the advertisement decoded, hints, making and previewing rules); What's new, guides and Mask addresses; troubleshooting and a quick reference.",
+    "description": "The phone app at /app: opening it and adding it to the home screen, the top bar, the ☰ menu and the filter; the Map, Day and Watch list views; Devices and a radio's own page with ＋ My device; the Phone check and Identification; uploading Fieldwatch exports from the phone (phones, results, coverage, sharing); Until and Whose data; the Workbench for admins (status and notes, the advertisement decoded, hints, making and previewing rules); What's new, guides and Mask addresses; troubleshooting and a quick reference.",
     "date": "2026-11-09"
   },
   {
     "file": "Harava_Admin_Guide.pdf",
     "title": "Harava – Admin and server guide",
-    "description": "Running Harava on a server next to other sites: installing it step by step on Ubuntu with a systemd service, nginx and a Let's Encrypt certificate without touching the other sites; users and the View only / Analyze / Admin permissions on the Maintenance page; updating with update.sh and rolling back; the Workbench and its local rules; backups, moving and removing; security, troubleshooting and a quick reference of the server commands.",
+    "description": "Running Harava on a server next to other sites: installing it step by step on Ubuntu with a systemd service, nginx and a Let's Encrypt certificate without touching the other sites; users, their own data and the View only / Analyze / Admin permissions on the Maintenance page; updating with update.sh, the database conversion and rolling back; the Workbench and its local rules; backups, moving and removing; security, troubleshooting and a quick reference of the server commands.",
     "date": "2026-11-09"
   }
 ]

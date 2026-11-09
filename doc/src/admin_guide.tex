@@ -64,7 +64,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad Admin and server guide, version 1.1 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad Admin and server guide, version 1.2 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava on a Server}\par\vspace{5pt}
 {\large\bfseries Installing Harava next to other sites with nginx and Let's Encrypt,\\ users and permissions, updating, backups and troubleshooting}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -244,12 +244,14 @@ Permission & Can\\
 \midrule
 View only & see the map, the Devices list, the Phone check, the Identification page and the guides; export CSV\\
 Analyze & also change the data: upload and import Fieldwatch exports, \ui{Scan folder}, switch or delete imports, edit My devices, \ui{Reload database}\\
-Admin & also manage users on the Maintenance page\\
+Admin & also manage users on the Maintenance page, see and combine every user's data (\ui{Whose data} $\rightarrow$ \emph{All users}), and use the Workbench\\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \fig{a_maintenance.jpg}{1.0}{The Maintenance page (\texttt{/maintenance}, \ui{Maintenance} in the menu for admins). Top: the users, with their names, permission and \emph{active} switch, which take effect as soon as they are changed. Middle: adding a user. Bottom: the log of sign-ins, failed sign-ins and changes, with the address they came from.}
+
+\lead{Each user's own data.} Every import belongs to the user who imported it, recorded on one of that user's \emph{phones}. Others do not see it unless the owner shares it (with all users or with chosen users); admins see every import. Each user's \emph{My devices} are personal. Data imported while Harava had no users (on your own computer) belongs to the first admin; when the first user is added, it moves to that admin. A removed user's imports stay, shown as \emph{removed user}, and an admin can delete them.
 
 \lead{Adding a user.} Type a username (3--64 letters, digits or \texttt{. \_ @ -}), first and last name, choose the permission and press \ui{Add user}. Harava makes a \emph{one-time password} and shows it once (Figure~\ref{fig:temp}); give it to the user. At the first sign-in the user must choose their own password before anything else.
 
@@ -277,7 +279,7 @@ bash ~/harava/update.sh
 \end{cmd}
 It shows the new commits and the changed files and asks \texttt{Update to <hash>? [y/N]}. After \texttt{y} it
 \begin{enumerate}[leftmargin=1.5em]
-\item copies \texttt{harava.db} and \texttt{harava\_users.db} to \texttt{\textasciitilde/harava\_backups/pre\_update\_<time>/} (safe while Harava runs; the 7 newest copies are kept);
+\item copies \texttt{harava.db}, \texttt{harava\_users.db} and \texttt{ids/local\_rules.json} to \texttt{\textasciitilde/harava\_backups/pre\_update\_<time>/} (safe while Harava runs; the 7 newest copies are kept);
 \item checks every changed Python file, page template and JSON file straight from git \emph{before} anything is changed --- if one fails, nothing changes and the old version keeps running;
 \item updates the files (\texttt{git merge --ff-only}) and installs packages only if \texttt{requirements.txt} changed;
 \item restarts \emph{only} the \texttt{harava} service and waits until \texttt{/healthz} answers.
@@ -297,6 +299,8 @@ SERVICE=name bash update.sh & for a service with another name\\
 \end{tabularx}
 \end{table}
 
+\lead{A new database format.} The version of 10 November 2026 stores every hear once per phone and links the imports to them. The first start after \texttt{update.sh} converts \texttt{harava.db} by itself, in one transaction (all or nothing; about a second for a few days of data), and the existing imports, phone and My devices become the first admin's. \texttt{bash update.sh --rollback} to an older version notices the newer format and puts back the database copy made before the update; the newer database is kept next to it as \texttt{harava.db.newer-<time>}.
+
 \lead{Your local files are safe.} \texttt{config.ini}, \texttt{api\_keys.py}, the two databases, \texttt{.harava\_secret} and \texttt{data/} are not in git, and the script never runs \texttt{git reset}, \texttt{stash} or \texttt{checkout}. If GitHub changes a file that has also been edited on the server, it stops without changing anything and tells what to do. It also warns when \texttt{api\_keys.py} is missing, when \texttt{require\_login} is not \texttt{true}, or when there are no users. Run it as \texttt{bash update.sh}; do not \texttt{chmod +x} it (git would see the changed mode as a local edit).
 
 % ─────────────────────────────────────────────────────────────────────
@@ -315,13 +319,13 @@ SERVICE=name bash update.sh & for a service with another name\\
 
 % ─────────────────────────────────────────────────────────────────────
 \section{Backups, moving and removing}\label{sec:backup}
-\lead{What to keep.} \texttt{harava.db} (also the Workbench notes), \texttt{harava\_users.db}, \texttt{ids/local\_rules.json} (the Workbench's rules), \texttt{config.ini}, \texttt{api\_keys.py} and \texttt{.harava\_secret}. \texttt{update.sh} copies the databases and the local rules before every update; copy them off the server now and then, for example from your own computer:
+\lead{What to keep.} \texttt{harava.db} (also the Workbench notes), \texttt{harava\_users.db}, \texttt{ids/local\_rules.json} (the Workbench's rules), \texttt{config.ini}, \texttt{api\_keys.py} and \texttt{.harava\_secret}. \texttt{archive/} holds a compressed copy of every uploaded export (for \ui{Re-read}; \texttt{keep\_originals = false} in \texttt{config.ini} turns it off); it can be rebuilt from your own exports, so it is not part of the update backups. \texttt{update.sh} copies the databases and the local rules before every update; copy them off the server now and then, for example from your own computer:
 \begin{cmd}
 scp ubuntu@harava.oh2gax.org:harava_backups/pre_update_*/harava*.db .
 \end{cmd}
 A consistent copy while Harava runs: \texttt{sqlite3 harava.db ".backup harava\_copy.db"} (or the copies \texttt{update.sh} makes).
 
-\lead{Moving to another server.} Install as in Section~\ref{sec:install}, but before step~\ref{sec:firstadmin} copy the six files above into \texttt{\textasciitilde/harava}; the users and the data come with them.
+\lead{Moving to another server.} Install as in Section~\ref{sec:install}, but before step~\ref{sec:firstadmin} copy the six files above (and \texttt{archive/}, if you want Re-read) into \texttt{\textasciitilde/harava}; the users and the data come with them.
 
 \lead{Removing Harava completely.}
 \begin{cmd}

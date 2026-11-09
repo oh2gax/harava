@@ -13,14 +13,18 @@ open_browser = true
 travel_min_m = 500
 
 ; ── Sign-in ──
-; Set the username and password with:  python harava.py --set-password
-; (stored as a hash in harava_login.json, which is not in git). With a password set, every page needs a sign-in.
-; require_login = true: refuse to start without a password. Use it on a server.
+; Add the first admin with:  python harava.py --add-admin   (other users on the /maintenance page).
+; Users are kept in harava_users.db (not in git). Once a user exists, every page needs a sign-in.
+; require_login = true: refuse to start without users. Use it on a server.
 require_login = false
 ; true when Harava runs behind nginx with HTTPS (trusts X-Forwarded-*, cookies over HTTPS only)
 behind_proxy = false
 ; days that "Keep me signed in" lasts
 session_days = 30
+
+; ── Imports ──
+; Keep a compressed copy of every uploaded export in archive/<user>/ so it can be read again (Re-read)
+keep_originals = true
 
 ; ── On a server (harava.oh2gax.org) these lines are: ──
 ; host = 127.0.0.1

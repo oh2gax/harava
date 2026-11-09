@@ -23,6 +23,9 @@
 \usepackage{amssymb}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning}
+\DeclareUnicodeCharacter{FF0B}{+}
+\DeclareUnicodeCharacter{25C0}{\ensuremath{\blacktriangleleft}}
+\DeclareUnicodeCharacter{25B6}{\ensuremath{\blacktriangleright}}
 \usepackage[hidelinks]{hyperref}
 
 \definecolor{accent}{HTML}{0369A1}
@@ -38,7 +41,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava --- what your phone heard, raked together}
-\fancyhead[R]{\small\itshape User guide, version 1.2 --- November 2026}
+\fancyhead[R]{\small\itshape User guide, version 1.3 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -59,7 +62,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad User guide, version 1.2 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad User guide, version 1.3 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava}\par\vspace{5pt}
 {\large\bfseries How to collect with Fieldwatch and read what your phone heard:\\ import, map, devices, layers and the classroom phone check}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -221,19 +224,53 @@ The menu on the left, from the top:
 
 % ─────────────────────────────────────────────────────────────────────
 \section{Importing}\label{sec:import}
-\fig{g_imports.jpg}{1.0}{The Imports page. The log of 8 November is on; Fieldwatch's own KML of the same day was switched off automatically, because it repeats the same radios.}
+\fig{g_imports.jpg}{1.0}{The Imports page seen by an admin with \ui{All users}: two exports of the rolling log a day apart (\emph{extends}), a Wi-Fi-only export (\emph{duplicate}, striped), two exports of one running Sit (\emph{sit update}), Fieldwatch's KML switched off, and another user's shared imports from her own phone. The coverage bars show what each file covers.}
 
-\lead{Two ways in.} Drop files on the dashed box (or \ui{choose files}), or press \ui{Scan folder}. It reads every new \texttt{.csv}, \texttt{.jsonl} and \texttt{.kml} in the \texttt{data} folder, sub-folders included. A file that is already imported is skipped, even under another name.
+\lead{Drop everything.} Drop files on the dashed box (or \ui{choose files}) --- one file, many files, or a \texttt{.zip} of them. On your own computer \ui{Scan folder} reads every new \texttt{.csv}, \texttt{.jsonl} and \texttt{.kml} in the \texttt{data} folder, sub-folders included, oldest file first. You do not need to pick files carefully: Harava sorts out the overlaps.
 
-\lead{What Harava recognises.} Fieldwatch log CSV and JSON lines, Sit export CSV and JSON lines (type \ui{SIT}), and KML from both (the Sit KML also brings your walking path).
+\lead{Why exports overlap.} Fieldwatch keeps its log on the phone in 12 rotating parts of about 1\,MB, and a log export copies \emph{everything still on the phone}. An export made on Tuesday therefore repeats most of Monday's export. Harava stores \textbf{every hear once per phone} and remembers which files contained it, so a newer export adds only its new rows.
 
-\lead{Clean counts by themselves.} When files cover the same time:
+\lead{The result of each file.} The \ui{Result} column (and the message after an upload) tells what a file brought:
 \begin{itemize}[leftmargin=1.2em]
-\item a \textbf{KML} is switched off when a log or Sit of the same time is already there (a KML repeats the same radios);
-\item a \textbf{newer export of the same sit} replaces the older one, which is switched off;
-\item a \textbf{log and a Sit} of the same time stay on together: they complement each other.
+\item \textbf{new} --- nothing of it was stored yet;
+\item \textbf{extends} --- a newer export of the rolling log: the rows already stored, and how many new ones (``$+3{,}388$'') from which time on;
+\item \textbf{overlaps} --- partly known, partly new;
+\item \textbf{duplicate} --- every row was already there, e.g.\ a Wi-Fi-only export or the same log as JSON lines (it merges with the CSV and keeps the longer raw data);
+\item \textbf{sit update} --- a newer export of the same running Sit: its radios are updated (more hits, last seen later), not counted twice.
 \end{itemize}
-The \ui{Use} switch turns a file on or off by hand; \ui{Delete} removes it from the database (the file itself is not touched). Radios marked \emph{Mine} in a Sit export are added to My devices (Section~\ref{sec:mine}).
+The very same file a second time is skipped, even under another name.
+
+\lead{What Harava recognises.} Fieldwatch log CSV and JSON lines, Sit export CSV and JSON lines (type \ui{SIT}), and KML from both (the Sit KML also brings your walking path). A KML has one point per radio and cannot be matched row by row, so a \textbf{KML} of the same phone and time as a log or Sit is switched off by itself. A \textbf{log and a Sit} of the same time stay on together: the log gives the timeline, the Sit every radio.
+
+\lead{Phone.} Choose the phone that recorded the files in \ui{Phone} before importing (\ui{＋} adds one). Rows are merged per phone: two phones that hear the same radio at the same moment stay two observations, and the radio gets a \textbf{2 phones} tag.
+
+\lead{The coverage bars} show each import over time: blue a log, green a Sit, violet a KML, grey a file switched off, striped one that brought nothing new. Click a bar to analyse exactly its days.
+
+\lead{Use, Re-read, Delete.} The \ui{Use} switch leaves a file out without deleting it. \ui{Re-read} reads the original file again --- Harava keeps a compressed copy of every upload --- when a new version of Harava reads more from it. \ui{Delete} removes the import; rows that another import also contains stay. Radios marked \emph{Mine} in a Sit export are added to your My devices (Section~\ref{sec:mine}).
+
+\lead{Several days at once.} Under \ui{Day}, \ui{Until} chooses the last day of a range (Figure~\ref{fig:whose}): the map, the timeline, the lists and the counts then cover all those days, from every file and without duplicates. \ui{◀}~\ui{▶} move the whole range.
+
+% ─────────────────────────────────────────────────────────────────────
+\section{Your data and other users' data}\label{sec:whose}
+\begin{figure}[H]\centering
+\begin{minipage}[c]{0.40\textwidth}\centering\includegraphics[width=\textwidth]{guide_img/g_range.jpg}\end{minipage}\hfill
+\begin{minipage}[c]{0.52\textwidth}\centering\includegraphics[width=\textwidth]{guide_img/g_share.jpg}\end{minipage}
+\caption{\ui{Whose data} and a range of two days in the sidebar (left); sharing one import (right).}\label{fig:whose}
+\end{figure}
+
+On a server with several users, every import belongs to the user who imported it, and \textbf{others do not see it} unless it is shared.
+
+\lead{Whose data} (in the sidebar, and in the phone app's menu) chooses what every page shows:
+\begin{itemize}[leftmargin=1.2em]
+\item \textbf{My data + shared with me} --- the default: your imports and those others shared with you;
+\item \textbf{My data only};
+\item \textbf{\emph{Name}'s data} --- one user's imports that you may see;
+\item \textbf{All users (admin)} --- admins see everyone's data and can combine it.
+\end{itemize}
+
+\lead{Sharing.} \ui{Share} on your own import: \emph{Private}, \emph{All users}, or chosen users. A shared import appears for them under \ui{Whose data}; they can look at it but not switch, re-read or delete it. Admins see every import anyway --- other users' data shows where they were, so a server admin is someone the users trust.
+
+\lead{Personal.} \emph{My devices} are personal: each user marks their own router, phone and PC, and they are hidden only from that user's views. Harava's identification database and the Workbench are shared by everyone.
 
 % ─────────────────────────────────────────────────────────────────────
 \section{The map}\label{sec:map}
@@ -496,6 +533,8 @@ start Harava & double-click \texttt{start\_harava.bat}; open \url{http://127.0.0
 collect without gaps & Fieldwatch: \ui{Write to disk} on + \ui{Start sit}; export Log CSV and Sit CSV\\
 bring in new files & copy them into \texttt{data}, \ui{Imports $\rightarrow$ Scan folder}\\
 see one day / an hour & \ui{Day}, \ui{From--to}, or click a timeline bar\\
+see several days & \ui{Day} and \ui{Until}, or click a bar in \ui{Imports $\rightarrow$ Coverage}\\
+see someone else's data & \ui{Whose data} (shared imports; admins: \ui{All users})\\
 see only one kind of device & click its name under \ui{Device layers} (again for all)\\
 graph only glasses & timeline \ui{Show $\rightarrow$ Glasses \& VR only}\\
 look at one radio & click its pin or its row; \ui{$\times$} closes the panel\\
@@ -510,6 +549,7 @@ change my password & click your name in the menu (\emph{My account})\\
 check the phone box & \ui{Phone check}: window start, 3 min, expected, \ui{Auto-calibrate box}\\
 take the list to Excel & \ui{Devices $\rightarrow$ Export CSV}\\
 remove a wrong file & \ui{Imports}: switch off or \ui{Delete}\\
+share an import & \ui{Imports $\rightarrow$ Share}\\
 see what is new & \ui{What's new} under the name\\
 remove the map watermark & CARTO key in \texttt{api\_keys.py}\\
 start from scratch & stop Harava, delete \texttt{harava.db}\\

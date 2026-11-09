@@ -169,12 +169,14 @@
     <div class="m-card needs-analyze">
       <div class="m-card-hd">Upload Fieldwatch exports</div>
       <div class="m-upload">
+        <div class="app-subrow"><span>Phone</span><select id="m-imp-phone" class="m-sel" aria-label="The phone that recorded the files"></select><button type="button" class="app-btn" id="m-imp-newphone" aria-label="Add a phone">＋</button></div>
         <button type="button" class="app-btn app-btn-primary" id="m-imp-pick">Choose files…</button>
-        <input type="file" id="m-imp-file" multiple accept=".csv,.jsonl,.json,.kml,text/csv,application/json,application/vnd.google-earth.kml+xml,text/plain,*/*" hidden>
-        <div class="m-small">Log export CSV or JSON lines, Sit export, or KML — for example straight from Fieldwatch's Downloads on this phone. A file already imported is skipped.</div>
+        <input type="file" id="m-imp-file" multiple accept=".csv,.jsonl,.json,.kml,.zip,text/csv,application/json,application/zip,application/vnd.google-earth.kml+xml,text/plain,*/*" hidden>
+        <div class="m-small">Log export CSV or JSON lines, Sit export, KML or a .zip — for example straight from Fieldwatch's Downloads on this phone. Choose every export at once: each hear is stored once per phone, so a file only adds what is new, and tells what it brought.</div>
         <div class="m-res" id="m-imp-res"></div>
       </div>
     </div>
+    <div class="m-card" id="m-cov-card" hidden><div class="m-card-hd">Coverage <span class="m-hd-r">tap a bar to analyse its time</span></div><div id="m-cov" class="m-cov"></div></div>
     <div class="m-card"><div class="m-card-hd">Imported files <span class="m-hd-r" id="m-imp-n"></span></div><div id="m-imp-list" class="app-hist-list"></div></div>
   </section>
 
@@ -208,6 +210,8 @@
       <select id="m-day"></select>
       <button type="button" class="app-step" id="m-day-next" aria-label="Next day">›</button>
     </div>
+    <div class="app-subrow"><span>Until</span><select id="m-day-to" class="m-sel" aria-label="Until (several days)"></select></div>
+    <div class="app-subrow" id="m-scope-row" hidden><span>Whose data</span><select id="m-scope" class="m-sel" aria-label="Whose data"></select></div>
   </div>
   <div class="app-tiles" role="group" aria-label="View">
     <button type="button" class="app-tile" data-view="map"><b>Map</b><small>path · pins · layers</small></button>
@@ -273,7 +277,7 @@
   </details>
   <details class="app-sec" data-for="imp">
     <summary>Imports options</summary>
-    <div class="app-small">Upload needs the <i>Analyze</i> permission. A <b>log</b> and a <b>Sit export</b> of the same time work together: the log gives the timeline, the Sit every radio. A KML of the same time is switched off automatically. Switch a file off to leave it out without deleting it.</div>
+    <div class="app-small">Upload needs the <i>Analyze</i> permission. Each file tells what it brought: <b>new</b>; <b>extends</b> — a newer export of the rolling log (Fieldwatch exports everything still on the phone, so most rows were already stored); <b>overlaps</b>; <b>duplicate</b> — nothing new; <b>sit update</b> — a newer export of the same sit. Your imports are yours: share one with all users if others should see it (on the full site also with chosen users); admins see everyone's data. A log and a Sit of the same time work together; a KML of the same phone and time is switched off. Switch a file off to leave it out without deleting it; <b>Re-read</b> reads the kept original again.</div>
   </details>
   {% if user.role == 'admin' %}
   <details class="app-sec" data-for="wb">

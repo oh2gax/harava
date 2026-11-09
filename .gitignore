@@ -32,3 +32,4 @@ doc/src/*.aux
 doc/src/*.log
 doc/src/*.out
 doc/src/*.toc
+archive/

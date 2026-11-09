@@ -45,13 +45,19 @@
         <a class="nav-item" href="/maintenance" style="text-decoration:none;color:inherit">⚙️ <span>Maintenance</span></a>{% endif %}
     </div>
 
+    <div class="sb-section" id="scopeSec" hidden>
+        <div class="sb-label">Whose data</div>
+        <select id="scopeSel" class="ident-sel" onchange="setScope(this.value)" title="Your own imports, imports others shared with you, one user's data, or (admins) everyone's"></select>
+    </div>
+
     <div class="sb-section">
         <div class="sb-label">Day</div>
         <div class="day-row">
-            <button class="icon-btn" onclick="stepDay(-1)" title="Previous day">◀</button>
+            <button class="icon-btn" onclick="stepDay(-1)" title="Previous day (keeps the length of the range)">◀</button>
             <select id="daySel" onchange="setDay(this.value)"></select>
-            <button class="icon-btn" onclick="stepDay(1)" title="Next day">▶</button>
+            <button class="icon-btn" onclick="stepDay(1)" title="Next day (keeps the length of the range)">▶</button>
         </div>
+        <div class="until-row" title="Analyse several days at once: every import of those days, without duplicates">Until <select id="dayTo" onchange="setDayTo(this.value)"></select></div>
         <div class="time-row">From <input type="time" id="tFrom" step="60" onchange="setTimes()"> to <input type="time" id="tTo" step="60" onchange="setTimes()"></div>
     </div>
 
@@ -238,20 +244,37 @@
     <div class="view" id="view-imports">
         <div class="page">
             <div class="page-head">
-                <h2>Imports</h2><span class="sub">Fieldwatch log and Sit exports: CSV, JSON lines (.jsonl) and KML</span><span class="grow"></span>
-                <button class="btn needs-analyze" onclick="scanFolder()" title="{{ watch_folder }}">🔄 Scan folder</button>
+                <h2>Imports</h2><span class="sub">Fieldwatch log and Sit exports: CSV, JSON lines (.jsonl), KML, or a .zip of them</span><span class="grow"></span>
+                <span class="needs-analyze imp-phone" title="The phone that recorded the files you import now. Rows are merged per phone: two phones hearing the same radio stay two observations.">Phone <select id="impPhone"></select>
+                    <button class="btn ghost" onclick="newPhone()" title="Add a phone">＋</button></span>
+                <button class="btn needs-analyze" id="scanBtn" onclick="scanFolder()" title="{{ watch_folder }}">🔄 Scan folder</button>
             </div>
             <div class="drop needs-analyze" id="drop">
-                <b>Drop files here</b> or <label style="color:var(--accent);cursor:pointer;text-decoration:underline">choose files<input type="file" id="fileIn" multiple accept=".csv,.jsonl,.json,.kml" style="display:none" onchange="uploadFiles(this.files)"></label><br>
-                <span style="font-size:11.5px">Scan folder reads every new .csv / .jsonl / .kml under <span class="mono">{{ watch_folder }}</span>. A file already imported is skipped.</span>
+                <b>Drop files here</b> or <label style="color:var(--accent);cursor:pointer;text-decoration:underline">choose files<input type="file" id="fileIn" multiple accept=".csv,.jsonl,.json,.kml,.zip" style="display:none" onchange="uploadFiles(this.files)"></label><br>
+                <span style="font-size:11.5px">Drop all your exports at once: Harava stores every hear once per phone, so overlapping exports add only what is new, and each file tells what it brought.<span id="scanNote"> <i>Scan folder</i> reads every new file under <span class="mono">{{ watch_folder }}</span>, oldest first.</span></span>
             </div>
             <div class="results" id="impResults"></div>
+            <div class="cov-card" id="impCovCard" hidden>
+                <div class="cov-head"><b>Coverage</b> <span class="sub">every import as a bar over time · click one to analyse its time · <span class="cov-key"><i class="t-log"></i>log <i class="t-sit"></i>Sit <i class="t-kml"></i>KML <i class="t-off"></i>off</span></span></div>
+                <div class="cov" id="impCov"></div>
+            </div>
             <table class="grid">
-                <thead><tr><th>Use</th><th>File</th><th>Type</th><th>Rows</th><th>Path pts</th><th>Covers</th><th>Imported</th><th></th></tr></thead>
+                <thead><tr><th>Use</th><th>File</th><th>Owner · phone</th><th>Type</th><th class="num">Rows</th><th>Result</th><th>Covers</th><th>Shared</th><th></th></tr></thead>
                 <tbody id="impBody"></tbody>
             </table>
-            <div class="note">Turn a file off to leave it out of every view without deleting it. A <b>log</b> and a <b>Sit export</b> of the same time work together: the log gives the timeline, the sit gives every radio (also those the log missed). A KML of the same time is switched off automatically, and a newer export of the same sit replaces the older one.</div>
+            <div class="note">
+                <b>Result</b> tells what a file brought: <b>new</b>; <b>extends</b> — a newer export of the rolling log (Fieldwatch exports everything still on the phone, so most rows were already stored); <b>overlaps</b>; <b>duplicate</b> — nothing new; <b>sit update</b> — a newer export of the same running sit. Deleting a file keeps the rows that another file also has.
+                Turn a file off to leave it out without deleting it. A <b>log</b> and a <b>Sit export</b> of the same time work together; a KML of the same phone and time as a log is switched off automatically.
+                <b>Shared</b>: your imports are yours; share one with all users or with chosen users, and it appears under <i>Whose data</i> for them. Admins see everyone's data. <b>Re-read</b> reads the kept original file again.
+            </div>
         </div>
+    </div>
+</div>
+
+<div class="modal-back" id="shareBack" onclick="if (event.target === this) closeShare()">
+    <div class="modal-card share-card" role="dialog" aria-modal="true">
+        <div class="modal-head"><span class="modal-title" id="shareTitle">Share</span><button class="modal-x" onclick="closeShare()" title="Close">&#10005;</button></div>
+        <div class="modal-body" id="shareBody"></div>
     </div>
 </div>
 
@@ -267,7 +290,7 @@
         <div class="modal-body" id="modalBody"></div>
     </div>
 </div>
-<script>window.FWA = { role: {{ user.role|tojson }}, appName: {{ app_name|tojson }}, version: {{ version|tojson }}, travelMin: {{ travel_min_m }}, cartoApiKey: {{ carto_api_key|tojson }} };</script>
+<script>window.FWA = { open: {{ (user.open or false)|tojson }}, role: {{ user.role|tojson }}, appName: {{ app_name|tojson }}, version: {{ version|tojson }}, travelMin: {{ travel_min_m }}, cartoApiKey: {{ carto_api_key|tojson }} };</script>
 <script src="{{ url_for('static', filename='common.js', v=version) }}"></script>
 <script src="{{ url_for('static', filename='app.js', v=version) }}"></script>
 <script src="{{ url_for('static', filename='info.js', v=version) }}"></script>

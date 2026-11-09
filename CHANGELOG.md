@@ -9,10 +9,49 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
 ## [2026-11-09]
 
 ### Changed
+- **Data store (schema 2, `PRAGMA user_version = 2`)** — `hears` holds every hear once per phone:
+  `collector_id` + `dkey` UNIQUE (`L<ts>|kind|mac|rssi` for log rows, `K…` for KML rows,
+  `S<sit_key>|kind|mac` for Sit rows); new `import_rows(import_id, hear_id)` links each import to
+  the hears it contained; `hears.import_id` is the first import. A repeated row fills empty values
+  and keeps the longer `raw` / `uuids` / `fleets` / `flags` (CSV cuts raw to 80 chars); a Sit row is
+  replaced by a newer export (more hits). `imports` gained `owner_id`, `collector_id`, `verdict`,
+  `new_rows`, `known_rows`, `shared` ('' / '*' / ',id,id,'), `archived`, `size`, `sit_key`; `sha1`
+  is unique per phone (UNIQUE(collector_id, sha1)). New table `collectors(id, owner_id, name)`;
+  `own_devices.owner_id`. `_migrate_v2` converts an older database at the first start in one
+  transaction (BEGIN IMMEDIATE … COMMIT / ROLLBACK), keeping import ids, switches and paths; the
+  author's data: 4 imports, 17,084 stored rows → 12,186 hears, the same 11,530 visible hears as before.
+- **Import** — `import_bytes(filename, data, path, owner_id, collector_id)` → `store_hears` (count
+  new / known), `_verdict`: new · extends (all new rows after the newest known one) · overlaps ·
+  duplicate · sit update. `_sit_key`: a Sit export with ≥ 80 % of its (kind, mac, first_seen)
+  pairs in an earlier Sit of the same phone is the same sit. The KML rule now looks only at the
+  same phone; the old "newer sit switches the older off" rule is replaced by merging. Notes are
+  stored in `imports.note`. `scan_folder` imports oldest file first; `import_upload` opens `.zip`
+  files (members oldest first). Originals are kept as `archive/<owner>/<sha1><ext>.gz`
+  (`keep_originals`, default true; not for Scan folder files, which keep their path).
+  `delete_import` removes links and only the hears no other import contains.
+- **Whose data** — `visible_imports(con, user, scope)` is the single choke point (`scope_ids`
+  caches it per request); `query_hears` filters by `EXISTS (import_rows …)` (skipped when every
+  import is visible) and returns `collector_id`; `build_devices` adds `phones`. Scope in the
+  session: `mine+shared` (default) · `mine` · `u:<id>` · `all` (admin). Without users (desktop)
+  everything is visible. The Workbench always uses every user's data. `claim_open_data()` gives
+  owner-0 rows to the first admin at start and when the first user is added.
+- **My devices per user** — `/api/own` lists, adds and deletes only the caller's rules.
+- `update.sh --rollback` restores the pre-update copy of `harava.db` when the database's
+  `user_version` is newer than the rolled-back code's `SCHEMA_VERSION` (keeps the newer one as
+  `harava.db.newer-<time>`).
+- `config.ini.example`: sign-in comments updated (`--add-admin`, `harava_users.db`), `keep_originals`.
 - `deploy/harava.service`: `Environment=TZ=Europe/Helsinki`, so days and times on the server
   follow Finnish time (the server itself runs in UTC).
 
 ### Added
+- **APIs** — `GET/POST /api/scope`, `GET /api/people`, `GET/POST /api/collectors`,
+  `POST /api/imports/<id>/share`, `POST /api/imports/<id>/reread`; `/api/import` takes `collector`
+  and `.zip`; `/api/imports` returns owner, phone, verdict, sharing and `can_edit`; toggle, delete,
+  share and re-read are allowed for the owner or an admin (JSON 403 otherwise); Scan folder for
+  admins (or without users) only.
+- **Pages** — sidebar *Whose data* and *Until*; Imports page with *Phone*, coverage bars, Result,
+  Owner · phone, Shared, Share dialog, Re-read; "N phones" tag and pill. Phone app: *Until* and
+  *Whose data* in the menu, phone choice, results, coverage, sharing and Re-read on Imports.
 - **Phone app** — `/app` (`templates/app.html`, `static/m-app.js`, `static/m-app.css`, icons in
   `static/icons/`), the WSPR Logger phone view's design: top bar (☰, title + day, local clock, theme,
   data status dot: newest hear < 6 h green, < 48 h amber), one view at a time (Map, Day, Watch list,

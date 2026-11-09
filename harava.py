@@ -18,6 +18,7 @@ is where THIS PHONE was when it heard the radio, not where the radio is.
 
 import configparser
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -35,6 +36,7 @@ import hmac
 import secrets
 from datetime import timedelta
 import xml.etree.ElementTree as ET
+import zipfile
 from collections import Counter, defaultdict
 from urllib.parse import quote_plus
 from datetime import datetime, timezone
@@ -66,6 +68,8 @@ CONFIG_DEFAULTS = {
     "behind_proxy": "false",
     # how long "Keep me signed in" lasts
     "session_days": "30",
+    # keep every uploaded export (gzip) in archive/<user>/ so it can be read again (Re-read)
+    "keep_originals": "true",
 }
 
 
@@ -90,6 +94,7 @@ def load_config():
         "require_login": c.getboolean("require_login"),
         "behind_proxy": c.getboolean("behind_proxy"),
         "session_days": c.getint("session_days"),
+        "keep_originals": c.getboolean("keep_originals"),
     }
 
 
@@ -253,23 +258,46 @@ VEHICLE_NAME = re.compile(r"polestar|tesla|obdlink|mitsubishi|audi_mmi|mbux|bmw|
 # ─────────────────────────── database ───────────────────────────
 
 SCHEMA = """
+-- One row per imported file. owner_id = the user who imported it (0 = no users yet, the desktop);
+-- collector_id = the phone that recorded it. sha1 is unique per phone, so two users can import the same file.
 CREATE TABLE IF NOT EXISTS imports (
-    id          INTEGER PRIMARY KEY,
-    filename    TEXT NOT NULL,
-    path        TEXT,
-    sha1        TEXT UNIQUE NOT NULL,
-    ftype       TEXT NOT NULL,
-    rows        INTEGER DEFAULT 0,
-    path_pts    INTEGER DEFAULT 0,
-    first_ts    INTEGER,
-    last_ts     INTEGER,
-    imported_at TEXT,
-    active      INTEGER DEFAULT 1,
-    note        TEXT
+    id           INTEGER PRIMARY KEY,
+    filename     TEXT NOT NULL,
+    path         TEXT,
+    sha1         TEXT NOT NULL,
+    ftype        TEXT NOT NULL,
+    rows         INTEGER DEFAULT 0,
+    path_pts     INTEGER DEFAULT 0,
+    first_ts     INTEGER,
+    last_ts      INTEGER,
+    imported_at  TEXT,
+    active       INTEGER DEFAULT 1,
+    note         TEXT,
+    owner_id     INTEGER DEFAULT 0,
+    collector_id INTEGER DEFAULT 0,
+    verdict      TEXT DEFAULT '',     -- new | extends | overlaps | duplicate | sit update
+    new_rows     INTEGER DEFAULT 0,   -- rows this file added
+    known_rows   INTEGER DEFAULT 0,   -- rows that were already stored (from an earlier export)
+    shared       TEXT DEFAULT '',     -- '' private, '*' all users, or user ids ',3,7,'
+    archived     TEXT DEFAULT '',     -- the original file, compressed, under archive/ (for Re-read)
+    size         INTEGER DEFAULT 0,
+    sit_key      TEXT DEFAULT '',
+    UNIQUE(collector_id, sha1)
 );
-CREATE TABLE IF NOT EXISTS hears (
+-- The phones that record (Fieldwatch exports do not tell which phone made them).
+CREATE TABLE IF NOT EXISTS collectors (
     id        INTEGER PRIMARY KEY,
-    import_id INTEGER NOT NULL,
+    owner_id  INTEGER DEFAULT 0,
+    name      TEXT NOT NULL,
+    created   TEXT
+);
+-- Every hear once per phone: dkey is what makes a row the same row in another export
+-- (log: time|kind|address|signal; KML: the same with K; Sit: the sit and the radio).
+CREATE TABLE IF NOT EXISTS hears (
+    id           INTEGER PRIMARY KEY,
+    import_id    INTEGER,             -- the import that first brought it
+    collector_id INTEGER NOT NULL DEFAULT 0,
+    dkey         TEXT NOT NULL,
     ts        INTEGER,
     kind      TEXT,
     mac       TEXT,
@@ -287,10 +315,21 @@ CREATE TABLE IF NOT EXISTS hears (
     lat       REAL,
     lon       REAL,
     vendor_ie TEXT,
-    UNIQUE(import_id, ts, kind, mac, rssi)
+    src       TEXT DEFAULT 'log',
+    hits      INTEGER DEFAULT 1,
+    last_ts   INTEGER,
+    rssi_min  INTEGER,
+    UNIQUE(collector_id, dkey)
 );
 CREATE INDEX IF NOT EXISTS ix_hears_ts  ON hears(ts);
 CREATE INDEX IF NOT EXISTS ix_hears_dev ON hears(kind, mac);
+-- which imports contain which hear (a hear can be in many overlapping exports)
+CREATE TABLE IF NOT EXISTS import_rows (
+    import_id INTEGER NOT NULL,
+    hear_id   INTEGER NOT NULL,
+    PRIMARY KEY (hear_id, import_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ix_import_rows_imp ON import_rows(import_id);
 CREATE TABLE IF NOT EXISTS paths (
     import_id INTEGER NOT NULL,
     part      INTEGER,
@@ -300,9 +339,10 @@ CREATE TABLE IF NOT EXISTS paths (
     lon       REAL
 );
 CREATE INDEX IF NOT EXISTS ix_paths_imp ON paths(import_id);
--- "My devices": rules for radios that are your own (hidden from lists, map and phone check)
+-- "My devices": rules for radios that are your own (hidden from lists, map and phone check), per user
 CREATE TABLE IF NOT EXISTS own_devices (
     id       INTEGER PRIMARY KEY,
+    owner_id INTEGER DEFAULT 0,
     label    TEXT NOT NULL,
     kind     TEXT DEFAULT '',      -- '' = any, 'WIFI' or 'BLE'
     match    TEXT NOT NULL,        -- mac | mac_prefix | name | name_contains
@@ -328,18 +368,87 @@ def db():
     return con
 
 
+SCHEMA_VERSION = 2
+
+
 def init_db():
     with db() as con:
+        old = {r[1] for r in con.execute("PRAGMA table_info(hears)")}
+        if old and "dkey" not in old:
+            _migrate_v2(con)                         # before SCHEMA: its indexes need the new tables
         con.executescript(SCHEMA)
         con.execute("PRAGMA journal_mode=WAL")
-        # v1.1: Sit export rows are one row per radio, with a hit count and a first..last span
-        have = {r[1] for r in con.execute("PRAGMA table_info(hears)")}
-        for col, decl in (("src", "TEXT DEFAULT 'log'"), ("hits", "INTEGER DEFAULT 1"),
-                          ("last_ts", "INTEGER"), ("rssi_min", "INTEGER")):
-            if col not in have:
-                con.execute(f"ALTER TABLE hears ADD COLUMN {col} {decl}")
-        con.execute("UPDATE hears SET src='kml' WHERE src='log' AND import_id IN "
-                    "(SELECT id FROM imports WHERE ftype='kml')")
+        have = {r[1] for r in con.execute("PRAGMA table_info(own_devices)")}
+        if "owner_id" not in have:
+            con.execute("ALTER TABLE own_devices ADD COLUMN owner_id INTEGER DEFAULT 0")
+        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+
+def _migrate_v2(con):
+    """Harava before 10.11.2026 stored the rows of every import separately. Move them into one row per
+    hear (per phone) with links to the imports; the imports keep their ids, files, switches and paths.
+    Everything belongs to owner 0 (the desktop) until claim_open_data() gives it to the first admin."""
+    print("  database     : updating to the merged store (one-time, keeps all imports) …", flush=True)
+    t0 = time.time()
+    con.isolation_level = None                       # one transaction: all or nothing
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        _migrate_v2_steps(con)
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    finally:
+        con.isolation_level = ""
+    print(f"  database     : updated in {time.time() - t0:.1f} s", flush=True)
+
+
+def _schema_statements():
+    return [x.strip() for x in SCHEMA.split(";\n") if x.strip() and not all(
+        ln.strip().startswith("--") or not ln.strip() for ln in x.splitlines())]
+
+
+def _migrate_v2_steps(con):
+    cols_old = {r[1] for r in con.execute("PRAGMA table_info(hears)")}
+    for col, decl in (("src", "TEXT DEFAULT 'log'"), ("hits", "INTEGER DEFAULT 1"),
+                      ("last_ts", "INTEGER"), ("rssi_min", "INTEGER")):
+        if col not in cols_old:
+            con.execute(f"ALTER TABLE hears ADD COLUMN {col} {decl}")
+    con.execute("UPDATE hears SET src='kml' WHERE COALESCE(src,'log')='log' AND import_id IN "
+                "(SELECT id FROM imports WHERE ftype='kml')")
+    con.execute("ALTER TABLE hears RENAME TO hears_v1")
+    con.execute("ALTER TABLE imports RENAME TO imports_v1")
+    con.execute("DROP INDEX IF EXISTS ix_hears_ts")
+    con.execute("DROP INDEX IF EXISTS ix_hears_dev")
+    for st in _schema_statements():
+        con.execute(st)
+    con.execute("INSERT INTO collectors(id, owner_id, name, created) VALUES (1, 0, 'Phone 1', ?)",
+                (datetime.now().isoformat(timespec="seconds"),))
+    con.execute("""INSERT INTO imports(id, filename, path, sha1, ftype, rows, path_pts, first_ts, last_ts, imported_at,
+                   active, note, owner_id, collector_id, verdict, new_rows, known_rows)
+                   SELECT id, filename, path, sha1, ftype, rows, path_pts, first_ts, last_ts, imported_at,
+                   active, note, 0, 1, '', 0, 0 FROM imports_v1 ORDER BY id""")
+    imps = con.execute("SELECT * FROM imports ORDER BY id").fetchall()
+    cols = ",".join(HEAR_COLS)
+    for imp in imps:
+        hs = [dict(r) for r in con.execute(f"SELECT {cols} FROM hears_v1 WHERE import_id=? ORDER BY id", (imp["id"],))]
+        for h in hs:
+            h["src"] = h["src"] or "log"
+            h["hits"] = h["hits"] or 1
+        sit_key, sit_match = "", None
+        if imp["ftype"] == "sit":
+            sit_key, sit_match = _sit_key(con, 1, hs, f"1-{imp['sha1'][:12]}")
+        n, new, known, new_ts, known_ts = store_hears(con, imp["id"], 1, hs, sit_key)
+        verdict, _ = _verdict(imp["ftype"], new, known, new_ts, known_ts, sit_match)
+        con.execute("UPDATE imports SET rows=?, new_rows=?, known_rows=?, verdict=?, sit_key=? WHERE id=?",
+                    (n, new, known, verdict, sit_key, imp["id"]))
+        if imp["ftype"] == "sit" and sit_match and not imp["active"]:
+            con.execute("UPDATE imports SET active=1 WHERE id=?", (imp["id"],))   # merged now: no double count
+    n_old = con.execute("SELECT COUNT(*) FROM hears_v1").fetchone()[0]
+    n_new = con.execute("SELECT COUNT(*) FROM hears").fetchone()[0]
+    con.execute("DROP TABLE hears_v1")
+    con.execute("DROP TABLE imports_v1")
+    print(f"  database     : {len(imps)} imports, {n_old} stored rows → {n_new} distinct hears", flush=True)
 
 
 # ─────────────────────────── helpers ───────────────────────────
@@ -662,129 +771,349 @@ def detect_type(filename, text):
     return "csv"
 
 
-def import_bytes(filename, data, path=None):
-    sha1 = hashlib.sha1(data).hexdigest()
-    with db() as con:
-        old = con.execute("SELECT id, filename FROM imports WHERE sha1=?", (sha1,)).fetchone()
+# ─────────────────────────── the data store ───────────────────────────
+# Fieldwatch's log export has no time range: it copies the phone's whole rolling log (12 parts of
+# about 1 MB) every time, so exports made on different days repeat each other. Harava therefore
+# keeps every hear once per phone (collector) and links each import to the rows it contained:
+# importing today's export after yesterday's only adds the new rows, and the import tells so
+# (its verdict). A Sit export is one row per radio for the whole sit; a later export of the same
+# running sit updates those rows. The original file is kept (compressed) for Re-read.
+
+HEAR_COLS = ["ts", "kind", "mac", "name", "rssi", "channel", "freq", "oui", "vendor", "fleets",
+             "mfg", "uuids", "flags", "raw", "lat", "lon", "vendor_ie", "src", "hits", "last_ts", "rssi_min"]
+_FILL_TEXT = ("name", "vendor", "oui", "mfg", "vendor_ie")          # keep the first non-empty value
+_LONGER_TEXT = ("raw", "uuids", "fleets", "flags")                  # keep the longer value (CSV cuts raw)
+
+
+def dkey_of(h, sit_key=""):
+    """What makes a hear the same hear in another export of the same phone."""
+    if h["src"] == "sit":
+        return f"S{sit_key}|{h['kind']}|{h['mac']}"
+    return f"{'K' if h['src'] == 'kml' else 'L'}{h['ts']}|{h['kind']}|{h['mac']}|{h['rssi']}"
+
+
+def _merged(old, new):
+    """The stored row after another export brought the same hear: fill gaps, keep the richer value;
+    for a Sit row the newer export (more hits) wins."""
+    out = {}
+    if new["src"] == "sit":
+        if (new["hits"] or 0) >= (old["hits"] or 0):
+            out = {c: new[c] for c in HEAR_COLS if new[c] not in (None, "")}
+            out["ts"] = min(x for x in (old["ts"], new["ts"]) if x is not None) if (old["ts"] or new["ts"]) else None
+        return {k: v for k, v in out.items() if old[k] != v}
+    for c in _FILL_TEXT:
+        if not old[c] and new[c]:
+            out[c] = new[c]
+    for c in _LONGER_TEXT:
+        if len(new[c] or "") > len(old[c] or ""):
+            out[c] = new[c]
+    for c in ("channel", "freq"):
+        if not old[c] and new[c]:
+            out[c] = new[c]
+    if old["lat"] is None and new["lat"] is not None:
+        out["lat"], out["lon"] = new["lat"], new["lon"]
+    return out
+
+
+def store_hears(con, import_id, collector_id, hears, sit_key=""):
+    """Add or merge the hears of one import and link them to it.
+    Returns (rows, new, known, ts of new rows, ts of known rows)."""
+    seen = set()
+    new_ts, known_ts = [], []
+    cols = ",".join(HEAR_COLS)
+    for h in hears:
+        k = dkey_of(h, sit_key)
+        if k in seen:                       # the same row twice in one file
+            continue
+        seen.add(k)
+        old = con.execute(f"SELECT id, {cols} FROM hears WHERE collector_id=? AND dkey=?", (collector_id, k)).fetchone()
         if old:
-            return {"file": filename, "status": "skipped", "reason": f"already imported as {old['filename']}"}
+            upd = _merged(old, h)
+            if upd:
+                con.execute(f"UPDATE hears SET {','.join(c + '=?' for c in upd)} WHERE id=?", (*upd.values(), old["id"]))
+            hid = old["id"]
+            known_ts.append(h["ts"])
+        else:
+            cur = con.execute(f"INSERT INTO hears(import_id, collector_id, dkey, {cols}) "
+                              f"VALUES (?,?,?,{','.join('?' * len(HEAR_COLS))})",
+                              (import_id, collector_id, k, *[h[c] for c in HEAR_COLS]))
+            hid = cur.lastrowid
+            new_ts.append(h["ts"])
+        con.execute("INSERT OR IGNORE INTO import_rows(import_id, hear_id) VALUES (?,?)", (import_id, hid))
+    return len(seen), len(new_ts), len(known_ts), new_ts, known_ts
+
+
+def _sit_key(con, collector_id, hears, fallback):
+    """A later export of the same (still running) sit shares most (radio, first seen) pairs with the
+    earlier one; Fieldwatch writes no sit id into the file. Returns (key, matched import or None)."""
+    pairs = {(h["kind"], h["mac"], h["ts"]) for h in hears if h["src"] == "sit"}
+    if not pairs:
+        return fallback, None
+    lo = min(p[2] for p in pairs if p[2]) if any(p[2] for p in pairs) else None
+    cands = con.execute("SELECT id, filename, sit_key FROM imports WHERE collector_id=? AND ftype='sit' AND sit_key<>''"
+                        " AND (? IS NULL OR last_ts >= ?) ORDER BY id DESC", (collector_id, lo, lo)).fetchall()
+    for c in cands:
+        theirs = {(r[0], r[1], r[2]) for r in con.execute(
+            "SELECT h.kind, h.mac, h.ts FROM hears h JOIN import_rows r ON r.hear_id = h.id "
+            "WHERE r.import_id=? AND h.src='sit'", (c["id"],))}
+        if theirs and len(pairs & theirs) >= 0.8 * min(len(pairs), len(theirs)):
+            return c["sit_key"], c
+    return fallback, None
+
+
+def _verdict(ftype, new, known, new_ts, known_ts, sit_match):
+    if ftype == "sit":
+        return ("sit update" if sit_match else "new"), (
+            f"same sit as {sit_match['filename']}: {new} radio(s) more" if sit_match else "")
+    if new == 0:
+        return "duplicate", "every row was already stored from an earlier export"
+    if known == 0:
+        return "new", ""
+    kmax = max((t for t in known_ts if t), default=None)
+    nmin = min((t for t in new_ts if t), default=None)
+    if kmax is not None and nmin is not None and nmin >= kmax:
+        return "extends", f"{known} rows were already stored; {new} new rows from {fmt_local(nmin)} on"
+    return "overlaps", f"{known} rows were already stored; {new} new rows"
+
+
+def fmt_local(ms):
+    return datetime.fromtimestamp(ms / 1000).strftime("%d.%m. %H:%M") if ms else ""
+
+
+def _archive(owner_id, sha1, filename, data):
+    """Keep the original export (gzip) so it can be read again when Harava reads more from it."""
+    if not CFG.get("keep_originals", True):
+        return ""
+    ext = os.path.splitext(filename)[1].lower()[:8] or ".dat"
+    rel = os.path.join("archive", str(int(owner_id)), f"{sha1}{ext}.gz")
+    full = os.path.join(HERE, rel)
+    try:
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        if not os.path.exists(full):
+            with gzip.open(full, "wb") as fh:
+                fh.write(data)
+        return rel.replace(os.sep, "/")
+    except OSError:
+        return ""
+
+
+def _parse(filename, data):
     text = data.decode("utf-8", errors="replace").lstrip("﻿")
     ftype = detect_type(filename, text)
+    if ftype == "kml":
+        hears, paths, mine = parse_kml(text)
+    elif ftype == "jsonl":
+        hears, paths, mine = parse_jsonl(text)
+    else:
+        hears, paths, mine = parse_csv(text)
+    if hears and all(h["src"] == "sit" for h in hears):
+        ftype = "sit"            # a Sit export (one row per radio), CSV or JSON lines
+    return ftype, hears, paths, mine
+
+
+def default_collector(con, owner_id):
+    r = con.execute("SELECT id FROM collectors WHERE owner_id=? ORDER BY id LIMIT 1", (owner_id,)).fetchone()
+    if r:
+        return r[0]
+    return con.execute("INSERT INTO collectors(owner_id, name, created) VALUES (?,?,?)",
+                       (owner_id, "Phone 1", datetime.now().isoformat(timespec="seconds"))).lastrowid
+
+
+def import_bytes(filename, data, path=None, owner_id=0, collector_id=None):
+    sha1 = hashlib.sha1(data).hexdigest()
+    with _db_lock, db() as con:
+        if collector_id is None:
+            collector_id = default_collector(con, owner_id)
+        old = con.execute("SELECT id, filename FROM imports WHERE sha1=? AND collector_id=?", (sha1, collector_id)).fetchone()
+        if old:
+            return {"file": filename, "status": "skipped", "verdict": "duplicate",
+                    "reason": f"this very file was already imported as {old['filename']}"}
     try:
-        if ftype == "kml":
-            hears, paths, mine = parse_kml(text)
-        elif ftype == "jsonl":
-            hears, paths, mine = parse_jsonl(text)
-        else:
-            hears, paths, mine = parse_csv(text)
+        ftype, hears, paths, mine = _parse(filename, data)
     except ET.ParseError as e:
         return {"file": filename, "status": "error", "reason": f"KML could not be read: {e}"}
     except Exception as e:  # noqa: BLE001 – report anything to the user
         return {"file": filename, "status": "error", "reason": str(e)}
     if not hears and not paths:
         return {"file": filename, "status": "error", "reason": "no Fieldwatch rows found"}
-    if hears and all(h["src"] == "sit" for h in hears):
-        ftype = "sit"            # a Sit export (one row per radio), CSV or JSON lines
     ts_list = ([h["ts"] for h in hears if h["ts"]] + [h["last_ts"] for h in hears if h["last_ts"]]
                + [p["ts"] for p in paths if p["ts"]])
     first_ts, last_ts = (min(ts_list), max(ts_list)) if ts_list else (None, None)
+    archived = "" if path else _archive(owner_id, sha1, filename, data)
     with _db_lock, db() as con:
         cur = con.execute(
-            "INSERT INTO imports(filename, path, sha1, ftype, rows, path_pts, first_ts, last_ts, imported_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
-            (filename, path, sha1, ftype, 0, 0, first_ts, last_ts,
-             datetime.now().isoformat(timespec="seconds")))
+            "INSERT INTO imports(filename, path, sha1, ftype, rows, path_pts, first_ts, last_ts, imported_at,"
+            " owner_id, collector_id, archived, size) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (filename, path, sha1, ftype, 0, 0, first_ts, last_ts, datetime.now().isoformat(timespec="seconds"),
+             owner_id, collector_id, archived, len(data)))
         iid = cur.lastrowid
-        cols = ["ts", "kind", "mac", "name", "rssi", "channel", "freq", "oui", "vendor", "fleets",
-                "mfg", "uuids", "flags", "raw", "lat", "lon", "vendor_ie", "src", "hits", "last_ts", "rssi_min"]
-        con.executemany(
-            f"INSERT OR IGNORE INTO hears(import_id,{','.join(cols)}) VALUES (?,{','.join('?' * len(cols))})",
-            [(iid, *[h[c] for c in cols]) for h in hears])
-        n = con.execute("SELECT COUNT(*) FROM hears WHERE import_id=?", (iid,)).fetchone()[0]
-        npts = 0
-        for part, p in enumerate(paths):
-            con.executemany("INSERT INTO paths(import_id, part, seq, ts, lat, lon) VALUES (?,?,?,?,?,?)",
-                            [(iid, part, i, p["ts"], la, lo) for i, (la, lo) in enumerate(p["pts"])])
-            npts += len(p["pts"])
-        con.execute("UPDATE imports SET rows=?, path_pts=? WHERE id=?", (n, npts, iid))
-        notes = [_avoid_double_counting(con, iid, ftype, first_ts, last_ts)]
+        sit_key, sit_match = "", None
+        if ftype == "sit":
+            sit_key, sit_match = _sit_key(con, collector_id, hears, f"{collector_id}-{sha1[:12]}")
+        n, new, known, new_ts, known_ts = store_hears(con, iid, collector_id, hears, sit_key)
+        npts = _store_paths(con, iid, paths)
+        verdict, vnote = _verdict(ftype, new, known, new_ts, known_ts, sit_match)
+        con.execute("UPDATE imports SET rows=?, path_pts=?, new_rows=?, known_rows=?, verdict=?, sit_key=? WHERE id=?",
+                    (n, npts, new, known, verdict, sit_key, iid))
+        notes = [vnote, _avoid_double_counting(con, iid, ftype, first_ts, last_ts, collector_id)]
         if mine:
-            added = _add_mine_rules(con, mine)
+            added = _add_mine_rules(con, mine, owner_id)
             if added:
                 notes.append(f"{added} radio(s) marked Mine in Fieldwatch added to My devices")
-    r = {"file": filename, "status": "imported", "type": ftype, "rows": n, "path_pts": npts}
+    r = {"file": filename, "status": "imported", "type": ftype, "rows": n, "path_pts": npts,
+         "new_rows": new, "known_rows": known, "verdict": verdict}
     note = "; ".join(x for x in notes if x)
     if note:
         r["note"] = note
+        with _db_lock, db() as con:
+            con.execute("UPDATE imports SET note=? WHERE id=?", (note, iid))
     return r
 
 
-def _add_mine_rules(con, mine):
+def _store_paths(con, iid, paths):
+    npts = 0
+    for part, p in enumerate(paths):
+        con.executemany("INSERT INTO paths(import_id, part, seq, ts, lat, lon) VALUES (?,?,?,?,?,?)",
+                        [(iid, part, i, p["ts"], la, lo) for i, (la, lo) in enumerate(p["pts"])])
+        npts += len(p["pts"])
+    return npts
+
+
+def reread_import(iid):
+    """Read an import's original file again (from the archive, or its path) and merge what it gives."""
+    with db() as con:
+        imp = con.execute("SELECT * FROM imports WHERE id=?", (iid,)).fetchone()
+    if not imp:
+        return {"error": "no such import"}
+    data = None
+    if imp["archived"] and os.path.exists(os.path.join(HERE, imp["archived"])):
+        with gzip.open(os.path.join(HERE, imp["archived"]), "rb") as fh:
+            data = fh.read()
+    elif imp["path"] and os.path.exists(imp["path"]):
+        with open(imp["path"], "rb") as fh:
+            data = fh.read()
+    if data is None:
+        return {"error": "the original file is not kept on this server"}
+    ftype, hears, paths, _ = _parse(imp["filename"], data)
+    with _db_lock, db() as con:
+        n, new, known, _, _ = store_hears(con, iid, imp["collector_id"], hears, imp["sit_key"])
+        con.execute("DELETE FROM paths WHERE import_id=?", (iid,))
+        npts = _store_paths(con, iid, paths)
+        con.execute("UPDATE imports SET rows=?, path_pts=?, note=? WHERE id=?",
+                    (n, npts, f"read again {datetime.now():%d.%m.%Y %H:%M}", iid))
+    return {"ok": True, "rows": n, "new_rows": new}
+
+
+def delete_import(iid):
+    """Remove an import; hears that no other import contains go with it."""
+    with _db_lock, db() as con:
+        imp = con.execute("SELECT archived FROM imports WHERE id=?", (iid,)).fetchone()
+        con.execute("CREATE TEMP TABLE IF NOT EXISTS _gone(id INTEGER PRIMARY KEY)")
+        con.execute("DELETE FROM _gone")
+        con.execute("INSERT INTO _gone SELECT hear_id FROM import_rows WHERE import_id=?", (iid,))
+        con.execute("DELETE FROM import_rows WHERE import_id=?", (iid,))
+        con.execute("DELETE FROM hears WHERE id IN (SELECT id FROM _gone) "
+                    "AND NOT EXISTS (SELECT 1 FROM import_rows r WHERE r.hear_id = hears.id)")
+        con.execute("UPDATE hears SET import_id = (SELECT MIN(import_id) FROM import_rows r WHERE r.hear_id = hears.id) "
+                    "WHERE import_id=?", (iid,))
+        con.execute("DELETE FROM paths WHERE import_id=?", (iid,))
+        con.execute("DELETE FROM imports WHERE id=?", (iid,))
+        still = imp and imp["archived"] and con.execute("SELECT 1 FROM imports WHERE archived=?", (imp["archived"],)).fetchone()
+    if imp and imp["archived"] and not still:
+        try:
+            os.remove(os.path.join(HERE, imp["archived"]))
+        except OSError:
+            pass
+
+
+def _add_mine_rules(con, mine, owner_id=0):
     added = 0
     for m in mine:
-        if con.execute("SELECT 1 FROM own_devices WHERE match='mac' AND value=? AND kind IN ('', ?)",
-                       (m["mac"], m["kind"])).fetchone():
+        if con.execute("SELECT 1 FROM own_devices WHERE owner_id=? AND match='mac' AND value=? AND kind IN ('', ?)",
+                       (owner_id, m["mac"], m["kind"])).fetchone():
             continue
-        con.execute("INSERT INTO own_devices(label, kind, match, value, created) VALUES (?,?,?,?,?)",
-                    (m["label"], m["kind"], "mac", m["mac"], datetime.now().isoformat(timespec="seconds")))
+        con.execute("INSERT INTO own_devices(owner_id, label, kind, match, value, created) VALUES (?,?,?,?,?,?)",
+                    (owner_id, m["label"], m["kind"], "mac", m["mac"], datetime.now().isoformat(timespec="seconds")))
         added += 1
     return added
 
 
-def _avoid_double_counting(con, iid, ftype, first_ts, last_ts):
-    """Keep counts clean when files of the same time are imported:
-    - a KML repeats radios that a log or Sit export of the same time already has -> the KML is switched off;
-    - a newer export of the same (still running) sit replaces the older one -> the older is switched off.
-    A log and a Sit export of the same time stay on together: the log has the timeline, the sit every radio.
-    Anything switched off can be switched on again in Imports."""
+def _avoid_double_counting(con, iid, ftype, first_ts, last_ts, collector_id):
+    """A KML is made from the same log, but its rows cannot be matched to the log's one by one
+    (it has one point per radio): a KML of the same phone and time as a log or sit is switched off,
+    and a log or sit switches such KML files off. Everything else is merged row by row instead.
+    Anything switched off can be switched on again on the Data page."""
     if not first_ts or not last_ts:
         return ""
-    overlap = ("SELECT id FROM imports WHERE id<>? AND active=1 AND {}"
+    overlap = ("SELECT id FROM imports WHERE id<>? AND active=1 AND collector_id=? AND {}"
                " AND first_ts <= ? AND last_ts >= ?")
-    args = (iid, last_ts, first_ts)
+    args = (iid, collector_id, last_ts, first_ts)
     if ftype == "kml":
         if con.execute(overlap.format("ftype<>'kml'"), args).fetchone():
             con.execute("UPDATE imports SET active=0 WHERE id=?", (iid,))
             return "switched off: a log or sit of the same time is already imported"
         return ""
-    msgs = []
     ids = [r[0] for r in con.execute(overlap.format("ftype='kml'"), args)]
     if ids:
         con.execute(f"UPDATE imports SET active=0 WHERE id IN ({','.join('?' * len(ids))})", ids)
-        msgs.append(f"switched off {len(ids)} KML file(s) of the same time")
-    if ftype == "sit":
-        older = [r[0] for r in con.execute(overlap.format("ftype='sit'"), args)]
-        if older:
-            con.execute(f"UPDATE imports SET active=0 WHERE id IN ({','.join('?' * len(older))})", older)
-            msgs.append(f"replaces {len(older)} earlier export(s) of the same sit (switched off)")
-    return "; ".join(msgs)
+        return f"switched off {len(ids)} KML file(s) of the same time"
+    return ""
 
 
 # Folders that Scan folder never enters (the app's own folders, also when the scan folder is the project root)
 SCAN_SKIP_DIRS = {".git", "__pycache__", "static", "templates", "doc", "venv", ".venv", "env",
-                  "node_modules", "tmp_files", "ids", "tools"}
+                  "node_modules", "tmp_files", "ids", "tools", "archive"}
 
 
-def scan_folder(folder):
-    results = []
+IMPORT_EXT = (".csv", ".jsonl", ".json", ".kml")
+
+
+def _importable(fn):
+    f = os.path.basename(fn).lower()
+    return f.endswith(IMPORT_EXT) and not f.startswith(("devices-export", "harava_workbench"))
+
+
+def scan_folder(folder, owner_id=0, collector_id=None):
+    """Import every new export in the folder (sub-folders included), oldest file first, so that each
+    newer export is compared with what the older ones already brought."""
+    found = []
     for dirpath, dirnames, filenames in os.walk(folder):
         dirnames[:] = sorted(d for d in dirnames if d not in SCAN_SKIP_DIRS and not d.startswith("."))
-        for fn in sorted(filenames):
-            if not fn.lower().endswith((".csv", ".jsonl", ".kml")):
-                continue
-            if fn.lower().startswith("devices-export"):
-                continue
-            p = os.path.join(dirpath, fn)
-            try:
-                with open(p, "rb") as fh:
-                    data = fh.read()
-            except OSError as e:
-                results.append({"file": fn, "status": "error", "reason": str(e)})
-                continue
-            r = import_bytes(fn, data, p)
-            r["folder"] = os.path.relpath(dirpath, folder)
-            results.append(r)
+        for fn in filenames:
+            if _importable(fn):
+                p = os.path.join(dirpath, fn)
+                try:
+                    found.append((os.path.getmtime(p), p, fn, dirpath))
+                except OSError:
+                    pass
+    results = []
+    for _, p, fn, dirpath in sorted(found):
+        try:
+            with open(p, "rb") as fh:
+                data = fh.read()
+        except OSError as e:
+            results.append({"file": fn, "status": "error", "reason": str(e)})
+            continue
+        r = import_bytes(fn, data, p, owner_id, collector_id)
+        r["folder"] = os.path.relpath(dirpath, folder)
+        results.append(r)
     return results
+
+
+def import_upload(filename, data, owner_id=0, collector_id=None):
+    """One uploaded file; a .zip is opened and its exports imported oldest first."""
+    if filename.lower().endswith(".zip"):
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(data))
+        except zipfile.BadZipFile:
+            return [{"file": filename, "status": "error", "reason": "not a readable zip file"}]
+        members = sorted((i for i in zf.infolist() if not i.is_dir() and _importable(i.filename)
+                          and i.file_size < 512 * 1024 * 1024), key=lambda i: (i.date_time, i.filename))
+        if not members:
+            return [{"file": filename, "status": "error", "reason": "no Fieldwatch exports in the zip"}]
+        return [dict(import_bytes(os.path.basename(i.filename), zf.read(i), None, owner_id, collector_id),
+                     folder=filename) for i in members]
+    return [import_bytes(filename, data, None, owner_id, collector_id)]
 
 
 # ─────────────────────────── Harava identification database ───────────────────────────
@@ -1043,37 +1372,87 @@ def ruuvi_decode(raw):
             "battery_mv": batt}
 
 
-def active_import_ids(con):
+def all_active_ids(con):
     return [r[0] for r in con.execute("SELECT id FROM imports WHERE active=1")]
 
 
-def query_hears(con, t_from=None, t_to=None, kind=None, mac=None, no_sit=False):
-    ids = active_import_ids(con)
+def _shared_to(shared, uid):
+    return shared == "*" or (bool(shared) and f",{uid}," in shared)
+
+
+def visible_imports(con, user=None, scope=None, active_only=True):
+    """The imports this request may use: the choke point of per-user data.
+    scope: 'mine' · 'mine+shared' (default) · 'u:<id>' (one user's data) · 'all' (admins).
+    Outside a request (command line, tests) or without users: every import."""
+    try:
+        user = user or current_user()
+        scope = scope or session.get("scope") or "mine+shared"
+    except RuntimeError:                          # no request context
+        user = None
+    rows = con.execute("SELECT id, owner_id, shared, active FROM imports").fetchall()
+    if active_only:
+        rows = [r for r in rows if r["active"]]
+    if not user or user.get("open"):
+        return [r["id"] for r in rows]
+    uid, admin = user["id"], user["role"] == "admin"
+    if scope == "all" and admin:
+        keep = rows
+    elif scope.startswith("u:") and scope[2:].isdigit():
+        oid = int(scope[2:])
+        keep = [r for r in rows if r["owner_id"] == oid and (admin or oid == uid or _shared_to(r["shared"], uid))]
+    elif scope == "mine":
+        keep = [r for r in rows if r["owner_id"] == uid]
+    else:
+        keep = [r for r in rows if r["owner_id"] == uid or _shared_to(r["shared"], uid)]
+    return [r["id"] for r in keep]
+
+
+def scope_ids(con):
+    """visible_imports for this request, computed once per request."""
+    try:
+        if "harava_ids" not in g:
+            g.harava_ids = visible_imports(con)
+        return g.harava_ids
+    except RuntimeError:
+        return visible_imports(con)
+
+
+def _ids_filter(con, ids):
+    """SQL (and args) that keeps hears contained in one of the imports `ids`."""
+    if not ids:
+        return "0", []
+    total = con.execute("SELECT COUNT(*) FROM imports").fetchone()[0]
+    if len(ids) == total:
+        return "1", []                            # everything: no need to look at the links
+    return (f"EXISTS (SELECT 1 FROM import_rows r WHERE r.hear_id = h.id AND r.import_id IN ({','.join('?' * len(ids))}))",
+            list(ids))
+
+
+def query_hears(con, t_from=None, t_to=None, kind=None, mac=None, no_sit=False, ids=None):
+    ids = scope_ids(con) if ids is None else ids
     if not ids:
         return []
-    where = [f"import_id IN ({','.join('?' * len(ids))})"]
-    args = list(ids)
+    f, args = _ids_filter(con, ids)
+    where = [f]
     if t_from:
         # a Sit-export row covers first..last seen, so it counts when that span overlaps the range
-        where.append("COALESCE(last_ts, ts) >= ?")
+        where.append("COALESCE(h.last_ts, h.ts) >= ?")
         args.append(t_from)
     if t_to:
-        where.append("ts < ?")
+        where.append("h.ts < ?")
         args.append(t_to)
     if kind:
-        where.append("kind = ?")
+        where.append("h.kind = ?")
         args.append(kind)
     if mac:
-        where.append("mac = ?")
+        where.append("h.mac = ?")
         args.append(mac)
     if no_sit:
-        where.append("COALESCE(src, 'log') <> 'sit'")
-    sql = ("SELECT ts, kind, mac, MAX(name) name, rssi, MAX(channel) channel, MAX(freq) freq, MAX(oui) oui,"
-           " MAX(vendor) vendor, MAX(fleets) fleets, MAX(mfg) mfg, MAX(uuids) uuids, MAX(flags) flags,"
-           " MAX(raw) raw, MAX(lat) lat, MAX(lon) lon, MAX(vendor_ie) vendor_ie,"
-           " COALESCE(src, 'log') src, MAX(COALESCE(hits, 1)) hits, MAX(last_ts) last_ts, MIN(rssi_min) rssi_min"
-           f" FROM hears WHERE {' AND '.join(where)}"
-           " GROUP BY ts, kind, mac, rssi, COALESCE(src, 'log') ORDER BY ts")
+        where.append("COALESCE(h.src, 'log') <> 'sit'")
+    sql = ("SELECT h.ts, h.kind, h.mac, h.name, h.rssi, h.channel, h.freq, h.oui, h.vendor, h.fleets, h.mfg, h.uuids,"
+           " h.flags, h.raw, h.lat, h.lon, h.vendor_ie, COALESCE(h.src, 'log') src, COALESCE(h.hits, 1) hits,"
+           " h.last_ts, h.rssi_min, h.collector_id"
+           f" FROM hears h WHERE {' AND '.join(where)} ORDER BY h.ts")
     return [dict(r) for r in con.execute(sql, args)]
 
 
@@ -1140,6 +1519,7 @@ def build_devices(hears):
             "spread_m": round(spread), "places": len(cells),
             "travelled": bool(spread >= CFG["travel_min_m"] and len(cells) >= 2),
             "tracker_mode": tmode, "sensor": sensor,
+            "phones": len({h.get("collector_id") for h in hs}),
         })
     # addresses that share a fingerprint: how many, and a name if any of them told it
     by_group = defaultdict(list)
@@ -1572,6 +1952,7 @@ def api_users_add():
                     (name, f.get("first_name", ""), f.get("last_name", ""), f.get("role", "view"),
                      generate_password_hash(pw), _now(), _now()))
     auth_log(f"added user {name} ({ROLES[f.get('role', 'view')]})", current_user()["username"], request.remote_addr or "")
+    claim_open_data()
     return jsonify({"ok": True, "temp_password": pw if temp else ""})
 
 
@@ -1663,13 +2044,18 @@ def admin_cli():
                            created, updated) VALUES (?,?,?,'admin',?,1,0,?,?)""",
                         (name, first, last, generate_password_hash(pw), _now(), _now()))
     auth_log("admin set from the command line", name, "console")
+    init_db()
+    claim_open_data()
     print(f"Saved: {name} is an admin. Other users are added on the /maintenance page.")
 
 
 @app.route("/")
 def index():
+    wf = CFG["watch_folder"]
+    if os.path.commonpath([os.path.abspath(wf), HERE]) == HERE:
+        wf = os.path.relpath(wf, HERE)                      # e.g. "data", inside Harava's folder
     return render_template("index.html", version=APP_VERSION, app_name=APP_NAME,
-                           watch_folder=CFG["watch_folder"], travel_min_m=int(CFG["travel_min_m"]),
+                           watch_folder=wf, travel_min_m=int(CFG["travel_min_m"]),
                            carto_api_key=CARTO_API_KEY, user=current_user())
 
 
@@ -1724,12 +2110,12 @@ def app_manifest():
 @app.route("/api/summary")
 def api_summary():
     with db() as con:
-        ids = active_import_ids(con)
-        imports = con.execute("SELECT COUNT(*) FROM imports").fetchone()[0]
+        ids = scope_ids(con)
+        imports = len(visible_imports(con, active_only=False))
         if not ids:
             return jsonify({"imports": imports, "days": [], "first": None, "last": None})
-        q = ",".join("?" * len(ids))
-        rows = con.execute(f"SELECT ts FROM hears WHERE import_id IN ({q}) AND ts IS NOT NULL", ids).fetchall()
+        f, args = _ids_filter(con, ids)
+        rows = con.execute(f"SELECT h.ts FROM hears h WHERE {f} AND h.ts IS NOT NULL", args).fetchall()
     days = Counter(datetime.fromtimestamp(r[0] / 1000).strftime("%Y-%m-%d") for r in rows)
     first = min((r[0] for r in rows), default=None)
     last = max((r[0] for r in rows), default=None)
@@ -1753,7 +2139,7 @@ def api_path():
         hears = query_hears(con, t_from, t_to, no_sit=True)   # Sit rows carry one hear-point, not a track
         parts = build_path(hears)
         # KML LineStrings carry no times; show them when their import overlaps the range
-        ids = active_import_ids(con)
+        ids = scope_ids(con)
         kml_parts = []
         if ids:
             q = ",".join("?" * len(ids))
@@ -1862,45 +2248,225 @@ def api_export():
                     headers={"Content-Disposition": f"attachment; filename={name}"})
 
 
+# ─────────────── data: whose data, phones, imports ───────────────
+
+def people():
+    """Every user: id → display name (first + last name, or the username)."""
+    try:
+        with udb() as con:
+            rows = con.execute("SELECT id, username, first_name, last_name, active FROM users").fetchall()
+    except sqlite3.Error:
+        return {}
+    return {r["id"]: {"name": (f"{r['first_name']} {r['last_name']}".strip() or r["username"]),
+                      "username": r["username"], "active": bool(r["active"])} for r in rows}
+
+
+def owner_name(oid, ppl):
+    if not oid:
+        return "this computer"
+    p = ppl.get(oid)
+    return p["name"] if p else f"removed user #{oid}"
+
+
+def claim_open_data():
+    """Data imported while Harava had no users (owner 0, e.g. on the desktop) belongs to the first admin."""
+    if not users_exist():
+        return
+    with udb() as ucon:
+        r = ucon.execute("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1").fetchone()
+    if not r:
+        return
+    with _db_lock, db() as con:
+        for t in ("imports", "collectors", "own_devices"):
+            con.execute(f"UPDATE {t} SET owner_id=? WHERE owner_id=0", (r["id"],))
+
+
+def _can_edit(imp, user):
+    return bool(user) and (user.get("open") or user["role"] == "admin" or imp["owner_id"] == user["id"])
+
+
+def _scope_options(con, user):
+    if not user or user.get("open"):
+        return [{"value": "mine+shared", "label": "All data"}]
+    uid, admin = user["id"], user["role"] == "admin"
+    ppl = people()
+    rows = con.execute("SELECT owner_id, shared FROM imports").fetchall()
+    owners = sorted({r["owner_id"] for r in rows if r["owner_id"] != uid and (admin or _shared_to(r["shared"], uid))},
+                    key=lambda o: owner_name(o, ppl).lower())
+    opts = [{"value": "mine+shared", "label": "My data + shared with me"},
+            {"value": "mine", "label": "My data only"}]
+    opts += [{"value": f"u:{o}", "label": f"{owner_name(o, ppl)}'s data"} for o in owners]
+    if admin:
+        opts.append({"value": "all", "label": "All users (admin)"})
+    return opts
+
+
+@app.route("/api/scope")
+def api_scope():
+    u = current_user()
+    with db() as con:
+        opts = _scope_options(con, u)
+    cur = session.get("scope") or "mine+shared"
+    if cur not in {o["value"] for o in opts}:
+        cur = "mine+shared"
+    return jsonify({"scope": cur, "options": opts, "label": next(o["label"] for o in opts if o["value"] == cur)})
+
+
+@app.route("/api/scope", methods=["POST"])
+def api_scope_set():
+    want = str((request.get_json(silent=True) or {}).get("scope", ""))
+    with db() as con:
+        opts = _scope_options(con, current_user())
+    if want not in {o["value"] for o in opts}:
+        return jsonify({"error": "you cannot see that data"}), 403
+    session["scope"] = want
+    return jsonify({"ok": True, "scope": want})
+
+
+@app.route("/api/people")
+def api_people():
+    """Users to share with (signed-in users only; names, no other details)."""
+    u = current_user()
+    return jsonify({"people": [{"id": k, "name": v["name"]} for k, v in sorted(people().items(), key=lambda x: x[1]["name"].lower())
+                               if v["active"] and (not u or k != u["id"])]})
+
+
+@app.route("/api/collectors")
+def api_collectors():
+    u = current_user()
+    with _db_lock, db() as con:
+        if u and (u.get("open") or u["role"] != "view"):
+            default_collector(con, u["id"])
+        rows = [dict(r) for r in con.execute(
+            "SELECT c.*, (SELECT COUNT(*) FROM imports i WHERE i.collector_id = c.id) imports FROM collectors c "
+            "WHERE owner_id=? ORDER BY id", (u["id"] if u else 0,))]
+    return jsonify({"collectors": rows})
+
+
+@app.route("/api/collectors", methods=["POST"])
+@needs("analyze")
+def api_collectors_add():
+    name = clean_text((request.get_json(silent=True) or {}).get("name", "")).strip()[:40]
+    if not name:
+        return jsonify({"error": "give the phone a name"}), 400
+    u = current_user()
+    with _db_lock, db() as con:
+        if con.execute("SELECT 1 FROM collectors WHERE owner_id=? AND name=? COLLATE NOCASE", (u["id"], name)).fetchone():
+            return jsonify({"error": "you already have a phone with that name"}), 400
+        cid = con.execute("INSERT INTO collectors(owner_id, name, created) VALUES (?,?,?)",
+                          (u["id"], name, datetime.now().isoformat(timespec="seconds"))).lastrowid
+    return jsonify({"ok": True, "id": cid})
+
+
+def _my_collector(con, user, want):
+    """The phone an import goes to: one of the user's own, else their first one."""
+    if want and str(want).isdigit():
+        r = con.execute("SELECT id FROM collectors WHERE id=? AND owner_id=?", (int(want), user["id"])).fetchone()
+        if r:
+            return r[0]
+    return default_collector(con, user["id"])
+
+
 @app.route("/api/imports")
 def api_imports():
+    u = current_user()
+    ppl = people()
     with db() as con:
-        rows = [dict(r) for r in con.execute("SELECT * FROM imports ORDER BY id DESC")]
-    return jsonify({"imports": rows, "watch_folder": CFG["watch_folder"]})
+        ids = set(visible_imports(con, active_only=False))
+        cols = {r["id"]: r["name"] for r in con.execute("SELECT id, name FROM collectors")}
+        rows = []
+        for r in con.execute("SELECT * FROM imports ORDER BY COALESCE(first_ts, 0) DESC, id DESC"):
+            if r["id"] not in ids:
+                continue
+            d = {k: r[k] for k in r.keys() if k not in ("path", "archived", "sha1")}
+            sh = r["shared"] or ""
+            d.update(owner_name=owner_name(r["owner_id"], ppl), phone=cols.get(r["collector_id"], ""),
+                     mine=bool(u) and (u.get("open") or r["owner_id"] == u["id"]), can_edit=_can_edit(r, u),
+                     rereadable=bool(r["archived"] or (r["path"] and os.path.exists(r["path"]))),
+                     shared_with=("all users" if sh == "*" else ", ".join(
+                         owner_name(int(x), ppl) for x in sh.strip(",").split(",") if x.isdigit())),
+                     shared_ids=[int(x) for x in sh.strip(",").split(",") if x.isdigit()] if sh != "*" else [])
+            rows.append(d)
+    return jsonify({"imports": rows, "watch_folder": CFG["watch_folder"] if (u and (u.get("open") or u["role"] == "admin")) else ""})
 
 
 @app.route("/api/import", methods=["POST"])
 @needs("analyze")
 def api_import():
+    u = current_user()
+    with _db_lock, db() as con:
+        cid = _my_collector(con, u, request.form.get("collector"))
     results = []
     for f in request.files.getlist("files"):
-        results.append(import_bytes(f.filename, f.read()))
+        results.extend(import_upload(f.filename, f.read(), u["id"], cid))
     return jsonify({"results": results})
 
 
 @app.route("/api/scan", methods=["POST"])
 @needs("analyze")
 def api_scan():
+    u = current_user()
+    if not (u.get("open") or u["role"] == "admin"):
+        return jsonify({"error": "Scan folder reads the server's own folder: admins only"}), 403
     if not os.path.isdir(CFG["watch_folder"]):
         return jsonify({"results": [], "error": f"folder not found: {CFG['watch_folder']}"}), 400
-    return jsonify({"results": scan_folder(CFG["watch_folder"])})
+    with _db_lock, db() as con:
+        cid = _my_collector(con, u, (request.get_json(silent=True) or {}).get("collector"))
+    return jsonify({"results": scan_folder(CFG["watch_folder"], u["id"], cid)})
+
+
+def _editable_import(iid):
+    with db() as con:
+        r = con.execute("SELECT * FROM imports WHERE id=?", (iid,)).fetchone()
+    if not r:
+        abort(Response(json.dumps({"error": "no such import"}), 404, mimetype="application/json"))
+    if not _can_edit(r, current_user()):
+        abort(Response(json.dumps({"error": "only its owner (or an admin) can change this import"}), 403,
+                       mimetype="application/json"))
+    return r
 
 
 @app.route("/api/imports/<int:iid>/toggle", methods=["POST"])
 @needs("analyze")
 def api_toggle(iid):
+    _editable_import(iid)
     with _db_lock, db() as con:
         con.execute("UPDATE imports SET active = 1 - active WHERE id=?", (iid,))
     return jsonify({"ok": True})
 
 
+@app.route("/api/imports/<int:iid>/share", methods=["POST"])
+@needs("analyze")
+def api_share(iid):
+    _editable_import(iid)
+    b = request.get_json(silent=True) or {}
+    w = b.get("shared", "")
+    if w == "*":
+        val = "*"
+    elif isinstance(w, list):
+        known = people()
+        ids = sorted({int(x) for x in w if str(x).isdigit() and int(x) in known})
+        val = ("," + ",".join(map(str, ids)) + ",") if ids else ""
+    else:
+        val = ""
+    with _db_lock, db() as con:
+        con.execute("UPDATE imports SET shared=? WHERE id=?", (val, iid))
+    return jsonify({"ok": True, "shared": val})
+
+
+@app.route("/api/imports/<int:iid>/reread", methods=["POST"])
+@needs("analyze")
+def api_reread(iid):
+    _editable_import(iid)
+    r = reread_import(iid)
+    return (jsonify(r), 400) if r.get("error") else jsonify(r)
+
+
 @app.route("/api/imports/<int:iid>", methods=["DELETE"])
 @needs("analyze")
 def api_delete(iid):
-    with _db_lock, db() as con:
-        con.execute("DELETE FROM hears WHERE import_id=?", (iid,))
-        con.execute("DELETE FROM paths WHERE import_id=?", (iid,))
-        con.execute("DELETE FROM imports WHERE id=?", (iid,))
+    _editable_import(iid)
+    delete_import(iid)
     return jsonify({"ok": True})
 
 
@@ -2065,8 +2631,8 @@ def _wb_state():
     """Every BLE device of all days, with its fingerprint and the days and 5-min slots it was heard in.
     Cached until the imports or the rules change."""
     with db() as con:
-        ids = tuple(active_import_ids(con))
-        hears = query_hears(con)
+        ids = tuple(all_active_ids(con))           # the Workbench looks at everyone's data
+        hears = query_hears(con, ids=list(ids))
     ck = (ids, len(hears), len(HV_RULES))
     if _WB_CACHE.get("key") == ck:
         return _WB_CACHE["state"]
@@ -2481,8 +3047,10 @@ OWN_MATCHES = ("mac", "mac_prefix", "name", "name_contains")
 
 @app.route("/api/own")
 def api_own():
+    u = current_user()
     with db() as con:
-        rows = [dict(r) for r in con.execute("SELECT * FROM own_devices ORDER BY label COLLATE NOCASE")]
+        rows = [dict(r) for r in con.execute("SELECT * FROM own_devices WHERE owner_id=? ORDER BY label COLLATE NOCASE",
+                                             (u["id"] if u else 0,))]
     return jsonify({"own": rows})
 
 
@@ -2506,12 +3074,13 @@ def api_own_add():
         if match == "mac" and len(value) != 17:
             return jsonify({"error": "a full address has 6 parts, AA:BB:CC:DD:EE:FF"}), 400
     with _db_lock, db() as con:
-        dup = con.execute("SELECT id FROM own_devices WHERE kind=? AND match=? AND value=? COLLATE NOCASE",
-                          (kind, match, value)).fetchone()
+        uid = current_user()["id"]
+        dup = con.execute("SELECT id FROM own_devices WHERE owner_id=? AND kind=? AND match=? AND value=? COLLATE NOCASE",
+                          (uid, kind, match, value)).fetchone()
         if dup:
             return jsonify({"error": "that rule already exists"}), 400
-        cur = con.execute("INSERT INTO own_devices(label, kind, match, value, created) VALUES (?,?,?,?,?)",
-                          (label, kind, match, value, datetime.now().isoformat(timespec="seconds")))
+        cur = con.execute("INSERT INTO own_devices(owner_id, label, kind, match, value, created) VALUES (?,?,?,?,?,?)",
+                          (uid, label, kind, match, value, datetime.now().isoformat(timespec="seconds")))
     return jsonify({"ok": True, "id": cur.lastrowid})
 
 
@@ -2519,7 +3088,7 @@ def api_own_add():
 @needs("analyze")
 def api_own_delete(oid):
     with _db_lock, db() as con:
-        con.execute("DELETE FROM own_devices WHERE id=?", (oid,))
+        con.execute("DELETE FROM own_devices WHERE id=? AND owner_id=?", (oid, current_user()["id"]))
     return jsonify({"ok": True})
 
 
@@ -2551,6 +3120,7 @@ def main():
         sys.exit("ERROR: require_login = true but there are no users yet. Run:  python harava.py --add-admin")
     move_old_database()
     init_db()
+    claim_open_data()
     os.makedirs(CFG["watch_folder"], exist_ok=True)
     url = f"http://{CFG['host']}:{CFG['port']}/"
     print(f"  database     : {CFG['db']}")
