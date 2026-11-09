@@ -1,0 +1,29 @@
+; Copy this file to config.ini and change what you need.
+[app]
+host = 127.0.0.1
+port = 5057
+; SQLite database file (relative to this folder)
+database = harava.db
+; Folder that "Scan folder" reads, sub-folders included (relative to this project folder).
+; Keep your Fieldwatch exports there; data/ is in .gitignore, so they never go to GitHub.
+watch_folder = data
+; Open the browser when the app starts
+open_browser = true
+; A radio heard at least this far apart (metres), in two or more places, is "travelled with me"
+travel_min_m = 500
+
+; ── Sign-in ──
+; Set the username and password with:  python harava.py --set-password
+; (stored as a hash in harava_login.json, which is not in git). With a password set, every page needs a sign-in.
+; require_login = true: refuse to start without a password. Use it on a server.
+require_login = false
+; true when Harava runs behind nginx with HTTPS (trusts X-Forwarded-*, cookies over HTTPS only)
+behind_proxy = false
+; days that "Keep me signed in" lasts
+session_days = 30
+
+; ── On a server (harava.oh2gax.org) these lines are: ──
+; host = 127.0.0.1
+; open_browser = false
+; require_login = true
+; behind_proxy = true

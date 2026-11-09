@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ app_name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}"/>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
+<script>
+(function () {
+    try {
+        var m = localStorage.getItem('fwa_theme_mode');
+        var light = m === 'light' || ((m !== 'dark') && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+        if (light) document.documentElement.classList.add('light');
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=version) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css', v=version) }}">
+</head>
+<body class="role-{{ user.role }}">
+
+<!-- ═══════════════════════ SIDEBAR ═══════════════════════ -->
+<div id="sidebar">
+    <div class="sb-header">
+        <div class="sb-title">📡 {{ app_name }}</div>
+        <div class="sb-sub" id="sbSub">No data yet</div>
+        {% if not user.open %}<div class="sb-user"><a href="/account" title="My account: change password">👤 {{ (user.first_name ~ ' ' ~ user.last_name).strip() or user.username }} · {{ user.role_name }}</a></div>{% endif %}
+        <div class="sb-whatsnew" id="navWhatsNew" onclick="openWhatsNew()" title="What's new, user guides and about">✨ What's new <span class="nav-badge" id="navVersion">{{ version }}</span></div>
+        <div class="sb-btns">
+            <button class="icon-btn" id="themeBtn" onclick="cycleTheme()" title="Theme: Auto">🌓</button>
+            {% if not user.open %}<button class="icon-btn" onclick="signOut()" title="Sign out ({{ user.username }})">⏻</button>{% endif %}
+            <button class="icon-btn" onclick="toggleSidebar()" title="Hide the menu">◀</button>
+        </div>
+    </div>
+
+    <div class="nav">
+        <div class="nav-item active" data-view="map" onclick="showView('map')">🗺️ <span>Map</span></div>
+        <div class="nav-item" data-view="devices" onclick="showView('devices')">📋 <span>Devices</span><span class="cnt" id="navDevCnt"></span></div>
+        <div class="nav-item" data-view="phones" onclick="showView('phones')">📵 <span>Phone check</span></div>
+        <div class="nav-item" data-view="ids" onclick="showView('ids')">🔎 <span>Identification</span></div>
+        <div class="nav-item" data-view="imports" onclick="showView('imports')">📥 <span>Imports</span><span class="cnt" id="navImpCnt"></span></div>
+        {% if user.role == 'admin' %}<a class="nav-item" href="/maintenance" style="text-decoration:none;color:inherit">⚙️ <span>Maintenance</span></a>{% endif %}
+    </div>
+
+    <div class="sb-section">
+        <div class="sb-label">Day</div>
+        <div class="day-row">
+            <button class="icon-btn" onclick="stepDay(-1)" title="Previous day">◀</button>
+            <select id="daySel" onchange="setDay(this.value)"></select>
+            <button class="icon-btn" onclick="stepDay(1)" title="Next day">▶</button>
+        </div>
+        <div class="time-row">From <input type="time" id="tFrom" step="60" onchange="setTimes()"> to <input type="time" id="tTo" step="60" onchange="setTimes()"></div>
+    </div>
+
+    <div class="sb-section">
+        <div class="sb-label">Filter <span class="r"><a onclick="resetFilters()">reset</a></span></div>
+        <input type="search" id="q" placeholder="Search name, MAC, vendor, identified as…" oninput="setQuery(this.value)">
+        <select id="fIdentAs" class="ident-sel" onchange="setIdentAs(this.value)" title="Show only one kind of identified device, e.g. Philips Hue lamp. The list is grouped by device layer and counts what the other filters leave."><option value="">Identified as: anything</option></select>
+        <div class="seg" id="kindSeg">
+            <button data-k="ALL" class="on" onclick="setKind('ALL')">All</button>
+            <button data-k="WIFI" onclick="setKind('WIFI')">Wi-Fi</button>
+            <button data-k="BLE" onclick="setKind('BLE')">Bluetooth</button>
+        </div>
+        <div class="range-row">Min RSSI <input type="range" id="minRssi" min="-105" max="-30" step="1" value="-105" oninput="setMinRssi(this.value)"><b id="minRssiVal">any</b></div>
+        <div style="margin-top:10px">
+            <label class="sw-row">Travelled with me <span class="switch"><input type="checkbox" id="fTravel" onchange="setFlag('travel',this.checked)"><span></span></span></label>
+            <label class="sw-row">Named or identified only <span class="switch"><input type="checkbox" id="fIdent" onchange="setFlag('ident',this.checked)"><span></span></span></label>
+            <label class="sw-row" title="Radios that only a Sit export has: the log missed them">Heard only in Sit <span class="switch"><input type="checkbox" id="fSitOnly" onchange="setFlag('sitOnly',this.checked)"><span></span></span></label>
+            <label class="sw-row" title="Show the changing addresses of one device (same Mesh UUID, same custom service …) as one row and one pin">Group same device <span class="switch"><input type="checkbox" id="fGroup" checked onchange="setGroupSame(this.checked)"><span></span></span></label>
+            <label class="sw-row">Hide my devices <small id="ownCnt"></small><span class="switch"><input type="checkbox" id="fHideOwn" checked onchange="setHideOwn(this.checked)"><span></span></span></label>
+        </div>
+    </div>
+
+    <div class="sb-section">
+        <div class="sb-label">Device layers <span class="r"><a onclick="allCats(true)">all</a> · <a onclick="allCats(false)">none</a></span></div>
+        <div id="catChips"></div>
+        <div class="note" style="margin-top:6px">Click a name to show only that layer, a group title to show only that group.</div>
+    </div>
+
+    <div class="sb-section">
+        <div class="sb-label">Map layers</div>
+        <label class="sw-row">Phone path <span class="switch"><input type="checkbox" id="lPath" checked onchange="setLayer('path',this.checked)"><span></span></span></label>
+        <label class="sw-row">Timeline graph <span class="switch"><input type="checkbox" id="lTimeline" checked onchange="setLayer('timeline',this.checked)"><span></span></span></label>
+        <label class="sw-row">Categories <span class="switch"><input type="checkbox" id="lCats" checked onchange="setLayer('cats',this.checked)"><span></span></span></label>
+        <label class="sw-row">Spread stacked pins <span class="switch"><input type="checkbox" id="lSpread" checked onchange="setLayer('spread',this.checked)"><span></span></span></label>
+        <label class="sw-row" title="For screenshots: hides the last half of every address, Wi-Fi network names and other people's device names. The data is not changed.">Mask addresses <span class="switch"><input type="checkbox" id="lMask" onchange="haravaMask.set(this.checked)"><span></span></span></label>
+    </div>
+
+    <div class="sb-section">
+        <div class="sb-label">Shown now</div>
+        <div class="mini-grid">
+            <div class="mini-card"><span>Devices</span><b id="stDev">–</b></div>
+            <div class="mini-card"><span>Hears</span><b id="stHears">–</b></div>
+            <div class="mini-card"><span>Wi-Fi</span><b id="stWifi">–</b></div>
+            <div class="mini-card"><span>Bluetooth</span><b id="stBle" class="grn">–</b></div>
+            <div class="mini-card"><span>Trackers</span><b id="stTrk" class="red">–</b></div>
+            <div class="mini-card"><span>Travelled</span><b id="stTrv" class="amb">–</b></div>
+        </div>
+    </div>
+    <div class="sb-foot">{{ app_name }} {{ version }} · data stays on this computer.<br>Pins are where your phone heard a radio, not where the radio is.</div>
+</div>
+
+<!-- ═══════════════════════ MAIN ═══════════════════════ -->
+<div id="main">
+    <div id="sbOpenBtn" onclick="toggleSidebar()" title="Show the menu">▶</div>
+
+    <!-- Map -->
+    <div class="view active" id="view-map">
+        <div id="map"></div>
+        <div class="panel" id="timelinePanel">
+            <div class="panel-title">Hears per <span id="tlBin">10 min</span> · Wi-Fi / Bluetooth · new devices
+                <select id="tlCat" class="tl-cat" onchange="setTlCat(this.value)" title="Show only one kind of device in the graph"></select>
+                <span id="tlNote" class="tl-note"></span>
+                <span class="r" id="tlRange"></span></div>
+            <canvas id="tlChart"></canvas>
+        </div>
+        <div class="panel hidden" id="detailPanel"></div>
+        <div class="panel" id="catPanel">
+            <div class="panel-title">Categories <span class="r">click to hide / show</span></div>
+            <div id="catList"></div>
+        </div>
+        <div class="panel" id="legendPanel">● filled = Bluetooth &nbsp; ○ ring = Wi-Fi &nbsp; bigger = louder</div>
+    </div>
+
+    <!-- Devices -->
+    <div class="view" id="view-devices">
+        <div class="page">
+            <div class="page-head">
+                <h2>Devices</h2><span class="sub" id="devSub"></span><span class="grow"></span>
+                <button class="btn ghost" onclick="exportCsv()">⬇ Export CSV</button>
+            </div>
+            <details class="own-box" id="ownBox">
+                <summary>★ My devices <span id="ownSum"></span></summary>
+                <div class="note" style="margin:2px 0 10px">Your own routers, PCs, phones, sensors… Matching radios are hidden from the list, the map and the phone check while <b>Hide my devices</b> is on (sidebar). Bluetooth devices often change their address, so for them match by <b>name</b>. Tip: the <b>＋</b> button on a row fills this form in for you.</div>
+                <div class="own-form needs-analyze">
+                    <select id="ownKind" title="Radio"><option value="">Any radio</option><option value="WIFI">Wi-Fi</option><option value="BLE">Bluetooth</option></select>
+                    <select id="ownMatch" title="How to match">
+                        <option value="mac">Address is</option>
+                        <option value="mac_prefix">Address starts with</option>
+                        <option value="name">Name is</option>
+                        <option value="name_contains">Name contains</option>
+                    </select>
+                    <input type="text" id="ownValue" placeholder="AA:BB:CC:DD:EE:FF or a name">
+                    <input type="text" id="ownLabel" placeholder="Label, e.g. Home router">
+                    <button class="btn" onclick="addOwn()">Add</button>
+                </div>
+                <table class="grid" style="margin-top:10px">
+                    <thead><tr><th>Label</th><th>Radio</th><th>Match</th><th>Value</th><th>Matches now</th><th></th></tr></thead>
+                    <tbody id="ownBody"></tbody>
+                </table>
+            </details>
+            <table class="grid" id="devTable">
+                <thead><tr id="devHead"></tr></thead>
+                <tbody id="devBody"></tbody>
+            </table>
+            <div class="note" id="devMore"></div>
+        </div>
+    </div>
+
+    <!-- Phone check -->
+    <div class="view" id="view-phones">
+        <div class="page">
+            <div class="page-head">
+                <h2>Phone check</h2>
+                <span class="sub">Are all the phones in the box? Pick the lesson window (sidebar Day + time) or set it here.</span>
+            </div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+                <div class="panel" style="position:static;width:330px">
+                    <div class="panel-title">Settings</div>
+                    <div class="kv" style="grid-template-columns:150px 1fr;align-items:center">
+                        <span>Window start</span><b><input type="time" id="pcStart" onchange="pcFromInputs()"></b>
+                        <span>Window length (min)</span><b><input type="text" id="pcLen" value="3" onchange="pcFromInputs()"></b>
+                        <span>Expected phones</span><b><input type="text" id="pcExpected" value="30" onchange="runPhoneCheck()"></b>
+                        <span>In box ≥ (dBm)</span><b><input type="text" id="pcBox" value="-55" onchange="runPhoneCheck()"></b>
+                        <span>In room ≥ (dBm)</span><b><input type="text" id="pcRoom" value="-80" onchange="runPhoneCheck()"></b>
+                        <span>Signal used</span><b><select id="pcStat" onchange="runPhoneCheck()"><option value="max">loudest hear</option><option value="med">median hear</option></select></b>
+                    </div>
+                    <label class="sw-row" style="margin-top:8px">Count unidentified random BLE as phones <span class="switch"><input type="checkbox" id="pcUnident" onchange="runPhoneCheck()"><span></span></span></label>
+                    <label class="sw-row">Count Windows PCs (Microsoft) <span class="switch"><input type="checkbox" id="pcMs" onchange="runPhoneCheck()"><span></span></span></label>
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button class="btn" onclick="pcAuto()" title="Set the box limit just below the Nth strongest phone (N = expected phones)">Auto-calibrate box</button>
+                        <button class="btn ghost" onclick="runPhoneCheck()">Run</button>
+                    </div>
+                    <div class="note">Phones change their Bluetooth address every ~15 min, so keep the window short (2–5 min) or one phone can be counted twice. A metal box blocks the radio completely: those phones then look "missing", not "in room". Devices in <b>My devices</b> (e.g. the teacher's own phone) are never counted.</div>
+                </div>
+                <div style="flex:1;min-width:420px">
+                    <div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px">
+                        <div class="mini-card"><span>Expected</span><b id="pcExp">–</b></div>
+                        <div class="mini-card"><span>In box</span><b id="pcInBox" class="grn">–</b></div>
+                        <div class="mini-card"><span>In room, not in box</span><b id="pcInRoom" class="red">–</b></div>
+                        <div class="mini-card"><span>Weak / outside</span><b id="pcOut">–</b></div>
+                    </div>
+                    <div class="panel" style="position:static;margin-bottom:12px">
+                        <div class="panel-title">Verdict <span class="r" id="pcWindow"></span></div>
+                        <div id="pcVerdict" style="font-size:15px;font-weight:600"></div>
+                    </div>
+                    <div class="panel" style="position:static;margin-bottom:12px;height:210px">
+                        <div class="panel-title">Phones by signal strength (dBm) · green = box limit · amber = room limit</div>
+                        <canvas id="pcChart" style="height:160px!important;width:100%!important"></canvas>
+                    </div>
+                    <table class="grid">
+                        <thead><tr><th>Zone</th><th>Type</th><th>Name</th><th>Address</th><th>RSSI</th><th>Hears</th><th>First</th><th>Last</th></tr></thead>
+                        <tbody id="pcBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Identification database -->
+    <div class="view" id="view-ids">
+        <div class="page">
+            <div class="page-head">
+                <h2>Identification</h2><span class="sub">Harava's own database for the radios Fieldwatch's signatures leave unidentified</span><span class="grow"></span>
+                <button class="btn ghost needs-analyze" onclick="reloadIds()" title="Read ids/harava_ids.json and ids/bt_assigned_numbers.json again after editing them">🔄 Reload database</button>
+            </div>
+            <div class="mini-grid" id="idCards" style="grid-template-columns:repeat(5,1fr);margin-bottom:12px"></div>
+            <div class="note" id="idSource" style="margin-bottom:14px"></div>
+            <h3 class="id-h">Still unidentified — what they advertise</h3>
+            <div class="note" style="margin:-2px 0 8px">The next rules to write. Each line is one kind of advertisement; the example shows its raw bytes.</div>
+            <table class="grid" style="margin-bottom:18px">
+                <thead><tr><th>Radios</th><th>Pattern</th><th>Loudest</th><th>Example</th><th>Example raw data</th></tr></thead>
+                <tbody id="idPatterns"></tbody>
+            </table>
+            <h3 class="id-h">Rules (tried in this order; the first that matches wins)</h3>
+            <div class="note" style="margin:-2px 0 8px">Confidence: <span class="id-high">high</span> = the protocol says so · <span class="id-med">medium</span> = typical, well known · <span class="id-low">low</span> = a likely guess. Hits count the addresses in the chosen range; Devices = how many devices those addresses belong to, where Harava can tell.</div>
+            <table class="grid">
+                <thead><tr><th>Rule</th><th>Identified as</th><th>Layer</th><th>Confidence</th><th>Matches</th><th>Hits</th><th>Devices</th></tr></thead>
+                <tbody id="idRules"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Imports -->
+    <div class="view" id="view-imports">
+        <div class="page">
+            <div class="page-head">
+                <h2>Imports</h2><span class="sub">Fieldwatch log and Sit exports: CSV, JSON lines (.jsonl) and KML</span><span class="grow"></span>
+                <button class="btn needs-analyze" onclick="scanFolder()" title="{{ watch_folder }}">🔄 Scan folder</button>
+            </div>
+            <div class="drop needs-analyze" id="drop">
+                <b>Drop files here</b> or <label style="color:var(--accent);cursor:pointer;text-decoration:underline">choose files<input type="file" id="fileIn" multiple accept=".csv,.jsonl,.json,.kml" style="display:none" onchange="uploadFiles(this.files)"></label><br>
+                <span style="font-size:11.5px">Scan folder reads every new .csv / .jsonl / .kml under <span class="mono">{{ watch_folder }}</span>. A file already imported is skipped.</span>
+            </div>
+            <div class="results" id="impResults"></div>
+            <table class="grid">
+                <thead><tr><th>Use</th><th>File</th><th>Type</th><th>Rows</th><th>Path pts</th><th>Covers</th><th>Imported</th><th></th></tr></thead>
+                <tbody id="impBody"></tbody>
+            </table>
+            <div class="note">Turn a file off to leave it out of every view without deleting it. A <b>log</b> and a <b>Sit export</b> of the same time work together: the log gives the timeline, the sit gives every radio (also those the log missed). A KML of the same time is switched off automatically, and a newer export of the same sit replaces the older one.</div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- What's new, User guides and About: one window with three tabs (as in WSPR Logger); × / Esc closes it -->
+<div class="modal-back" id="modalBack" onclick="if (event.target === this) closeModal()">
+    <div class="modal-card" role="dialog" aria-modal="true">
+        <div class="modal-head">
+            <span class="modal-title" id="modalTitle"></span>
+            <button class="modal-x" onclick="closeModal()" title="Close (Esc)">&#10005;</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+<script>window.FWA = { role: {{ user.role|tojson }}, appName: {{ app_name|tojson }}, version: {{ version|tojson }}, travelMin: {{ travel_min_m }}, cartoApiKey: {{ carto_api_key|tojson }} };</script>
+<script src="{{ url_for('static', filename='app.js', v=version) }}"></script>
+<script src="{{ url_for('static', filename='info.js', v=version) }}"></script>
+<script src="{{ url_for('static', filename='privacy.js', v=version) }}"></script>
+<script>try { document.getElementById('lMask').checked = window.haravaMask.on; } catch (e) {}</script>
+</body>
+</html>

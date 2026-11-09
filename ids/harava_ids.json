@@ -1,0 +1,567 @@
+{
+  "name": "Harava identification database",
+  "version": "2026-11-09.5",
+  "description": "Harava's own rules for radios that Fieldwatch's signatures leave unidentified. Rules are tried in order; the first that matches wins. A rule only changes the layer of a radio that Fieldwatch did not identify; for the others it adds the 'Identified as' text. Company names come from bt_assigned_numbers.json (Bluetooth SIG).",
+  "schema": {
+    "match (all given conditions must hold)": {
+      "kind": "BLE or WIFI",
+      "name_regex": "regular expression on the advertised name (case-insensitive)",
+      "mfg": "Bluetooth company ID of the manufacturer data, 4 hex digits, e.g. 004C = Apple",
+      "mfg_data_prefix": "hex the manufacturer data (after the company ID) starts with",
+      "ad_type": "advertising data type in the raw advertisement, 2 hex digits, e.g. 2B = Mesh Beacon",
+      "ad_data_prefix": "hex the data of that AD structure starts with",
+      "service_data_uuid": "16-bit UUID of Service Data, 4 hex digits",
+      "service_uuid_any": "list of 16-bit service UUIDs; one of them must be advertised",
+      "uuid128_any": "list of 128-bit service UUIDs (8-4-4-4-12); one of them must be advertised"
+    },
+    "group": "how to tell that several rotating addresses are the same device: take bytes [from, to) of the AD structure ad_type, of the manufacturer data (source = mfg) or of the service data of uuid (source = service_data). key (optional) names the group; rules with the same key join the same devices, e.g. two kinds of advert from one Mesh device",
+    "confidence": "high = the protocol says so; medium = typical, well known; low = a likely guess",
+    "name_from_group": "a nameless address that belongs to a group whose other addresses tell a name is identified again with that name, so e.g. the nameless Mesh beacons of a \"Charge\" device also become EV charging points"
+  },
+  "rules": [
+    {
+      "id": "name-windows-pc",
+      "name": "Windows PC",
+      "layer": "Phone / PC",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^(DESKTOP|LAPTOP)-[A-Z0-9]{5,}$"
+      },
+      "note": "Default Windows computer names."
+    },
+    {
+      "id": "name-samsung-tv",
+      "name": "Samsung TV",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "\\[TV\\]|QLED|Samsung .*Series"
+      },
+      "note": "Samsung TVs advertise their model name."
+    },
+    {
+      "id": "name-hue",
+      "name": "Philips Hue lamp",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Hue "
+      }
+    },
+    {
+      "id": "signify-hue",
+      "name": "Philips Hue lamp",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "service_uuid_any": [
+          "FE0F"
+        ]
+      },
+      "note": "Advertises Signify's Hue Bluetooth service (FE0F). Hue lamps keep it on even when they have no name or a room name."
+    },
+    {
+      "id": "signify-other",
+      "name": "Signify (Philips / WiZ) lighting",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "service_uuid_any": [
+          "FD8A",
+          "FE4B"
+        ]
+      },
+      "note": "Advertises a Bluetooth service number registered to Signify, the maker of Philips Hue and WiZ lights."
+    },
+    {
+      "id": "signify-mfg",
+      "name": "Signify (Philips / WiZ) lighting",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "060F"
+      },
+      "note": "Manufacturer data of Signify Netherlands B.V. (company 060F), the maker of Philips Hue and WiZ lights."
+    },
+    {
+      "id": "ev-charge-gatt",
+      "name": "EV charging point (DEFA?)",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Charge$",
+        "service_data_uuid": "1827"
+      },
+      "group": {
+        "source": "service_data",
+        "uuid": "1827",
+        "from": 0,
+        "to": 16,
+        "key": "mesh-device",
+        "label": "Mesh device UUID"
+      },
+      "note": "A Bluetooth Mesh device named \"Charge\" that is waiting to be set up. Seen in numbers around a shared EV charging system of a housing company (most likely DEFA chargers, which are configured over Bluetooth); they advertise all day like mains-powered equipment. The maker is not confirmed by a public source, hence the question mark."
+    },
+    {
+      "id": "ev-charge-beacon",
+      "name": "EV charging point (DEFA?)",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Charge$",
+        "ad_type": "2B",
+        "ad_data_prefix": "00"
+      },
+      "group": {
+        "ad_type": "2B",
+        "from": 1,
+        "to": 17,
+        "key": "mesh-device",
+        "label": "Mesh device UUID"
+      },
+      "note": "A Bluetooth Mesh device named \"Charge\" that is waiting to be set up. Seen in numbers around a shared EV charging system of a housing company (most likely DEFA chargers, which are configured over Bluetooth); they advertise all day like mains-powered equipment. The maker is not confirmed by a public source, hence the question mark."
+    },
+    {
+      "id": "name-audio",
+      "name": "Earbuds, headphones or speaker",
+      "layer": "Audio",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "buds|airpods|beats|\\bjbl\\b|bose|soundlink|tune \\d|wh-1000|wf-1000|jabra|sennheiser|marshall|\\bear\\b"
+      }
+    },
+    {
+      "id": "name-wearable",
+      "name": "Watch, fitness band or ring",
+      "layer": "Wearable",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "galaxy watch|galaxy fit|fitbit|garmin|amazfit|mi band|polar |suunto|oura|whoop"
+      }
+    },
+    {
+      "id": "name-ecoflow",
+      "name": "EcoFlow power station",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^EF-[A-Z0-9]{4,}"
+      },
+      "note": "EcoFlow names its devices EF-<model><serial>, e.g. EF-R3P… for a River 3 Plus."
+    },
+    {
+      "id": "name-oras",
+      "name": "Oras smart faucet or shower",
+      "layer": "Home & IoT",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^ORAS"
+      },
+      "note": "Oras (Finland) makes Bluetooth faucets and showers."
+    },
+    {
+      "id": "name-ruuvi",
+      "name": "Ruuvi sensor",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Ruuvi "
+      }
+    },
+    {
+      "id": "windows-3e1d",
+      "name": "Windows PC",
+      "layer": "Phone / PC",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "uuid128_any": [
+          "3E1D50CD-7E3E-427D-8E1C-B78AA87FE624"
+        ]
+      },
+      "note": "Advertises the 128-bit service 3E1D50CD-7E3E-427D-8E1C-B78AA87FE624. Every radio with this service that told a name had a Windows PC name, so it is a Windows service shared by many PCs, not a fingerprint of one PC. Its public meaning is not documented."
+    },
+    {
+      "id": "mesh-unprovisioned",
+      "name": "Bluetooth Mesh device, not set up",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "ad_type": "2B",
+        "ad_data_prefix": "00"
+      },
+      "group": {
+        "ad_type": "2B",
+        "from": 1,
+        "to": 17,
+        "label": "Mesh device UUID",
+        "key": "mesh-device"
+      },
+      "note": "An Unprovisioned Device Beacon: a smart lamp, plug or switch waiting to be added to a Bluetooth Mesh network. It changes its address often but keeps the same device UUID, so Harava can tell the addresses of one device apart from the others."
+    },
+    {
+      "id": "mesh-network",
+      "name": "Bluetooth Mesh network node",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "ad_type": "2B",
+        "ad_data_prefix": "01"
+      },
+      "group": {
+        "ad_type": "2B",
+        "from": 2,
+        "to": 10,
+        "label": "Mesh network ID"
+      },
+      "note": "A Secure Network Beacon of a set-up Bluetooth Mesh network (smart lighting and the like). The group is the network, not one device."
+    },
+    {
+      "id": "mesh-provisioning",
+      "name": "Bluetooth Mesh device, not set up",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "service_data_uuid": "1827"
+      },
+      "group": {
+        "source": "service_data",
+        "uuid": "1827",
+        "from": 0,
+        "to": 16,
+        "key": "mesh-device",
+        "label": "Mesh device UUID"
+      },
+      "note": "Mesh Provisioning service (1827): a device waiting to be added to a Bluetooth Mesh network, offering a phone a connection for the setup. Its service data carries the same device UUID as its Unprovisioned Device Beacons, so Harava joins both kinds of advert into one device."
+    },
+    {
+      "id": "mesh-proxy",
+      "name": "Bluetooth Mesh device, set up",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "service_uuid_any": [
+          "1828"
+        ]
+      },
+      "note": "Mesh Proxy service (1828): a device that is already in a Bluetooth Mesh network and lets a phone connect to it."
+    },
+    {
+      "id": "le-audio",
+      "name": "LE Audio device (earbuds, headphones or hearing aid)",
+      "layer": "Audio",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "service_uuid_any": [
+          "184E",
+          "184F",
+          "1850",
+          "1844",
+          "184D",
+          "1853",
+          "1854",
+          "1855",
+          "1856",
+          "1857",
+          "1858"
+        ]
+      },
+      "note": "Bluetooth LE Audio services (audio stream control, broadcast scan, volume, microphone, hearing access …)."
+    },
+    {
+      "id": "heart-rate",
+      "name": "Heart-rate sensor",
+      "layer": "Wearable",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "service_uuid_any": [
+          "180D"
+        ]
+      }
+    },
+    {
+      "id": "exposure-notification",
+      "name": "Phone with an exposure-notification app",
+      "layer": "Phone / PC",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "service_uuid_any": [
+          "FD6F"
+        ]
+      }
+    },
+    {
+      "id": "apple-airpods",
+      "name": "AirPods or Beats",
+      "layer": "Audio",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "07"
+      },
+      "note": "Apple Proximity Pairing message."
+    },
+    {
+      "id": "apple-nearby-info",
+      "name": "iPhone, iPad, Mac or Apple Watch",
+      "layer": "Phone / PC",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "10"
+      },
+      "note": "Apple Nearby Info message, sent all the time by Apple devices."
+    },
+    {
+      "id": "apple-handoff",
+      "name": "Apple device (Handoff)",
+      "layer": "Phone / PC",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "0C"
+      }
+    },
+    {
+      "id": "apple-nearby-action",
+      "name": "Apple device (Nearby Action: setup or Wi-Fi sharing)",
+      "layer": "Phone / PC",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "0F"
+      }
+    },
+    {
+      "id": "apple-airdrop",
+      "name": "Apple device (AirDrop)",
+      "layer": "Phone / PC",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "05"
+      }
+    },
+    {
+      "id": "apple-airplay-target",
+      "name": "Apple TV, HomePod or AirPlay speaker",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "09"
+      }
+    },
+    {
+      "id": "apple-airplay-source",
+      "name": "Apple device playing to AirPlay",
+      "layer": "Phone / PC",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "0A"
+      }
+    },
+    {
+      "id": "apple-homekit",
+      "name": "HomeKit accessory",
+      "layer": "Home & IoT",
+      "confidence": "high",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "06"
+      }
+    },
+    {
+      "id": "apple-watch",
+      "name": "Apple Watch (Magic Switch)",
+      "layer": "Wearable",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "0B"
+      }
+    },
+    {
+      "id": "apple-hotspot",
+      "name": "iPhone or iPad (Instant Hotspot)",
+      "layer": "Phone / PC",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "0E"
+      }
+    },
+    {
+      "id": "apple-hotspot-client",
+      "name": "Apple device looking for a hotspot",
+      "layer": "Phone / PC",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "0D"
+      }
+    },
+    {
+      "id": "apple-siri",
+      "name": "Apple device (Hey Siri)",
+      "layer": "Phone / PC",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "08"
+      }
+    },
+    {
+      "id": "apple-airprint",
+      "name": "AirPrint printer",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "03"
+      }
+    },
+    {
+      "id": "apple-other",
+      "name": "Apple device",
+      "layer": "Phone / PC",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C"
+      },
+      "note": "An Apple message type that Harava does not know yet (for example 0x16 or 0x1C); most such messages come from iPhones, iPads and Macs."
+    },
+    {
+      "id": "samsung-galaxy",
+      "name": "Samsung Galaxy device (phone, tablet, PC or watch)",
+      "layer": "Phone / PC",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "0075",
+        "mfg_data_prefix": "42"
+      },
+      "note": "Samsung's 0x42 message, sent by Galaxy devices for SmartThings and nearby sharing."
+    },
+    {
+      "id": "samsung-other",
+      "name": "Samsung device",
+      "layer": "Phone / PC",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "mfg": "0075"
+      }
+    },
+    {
+      "id": "microsoft",
+      "name": "Windows device",
+      "layer": "Phone / PC",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "0006"
+      },
+      "note": "Microsoft manufacturer data (Swift Pair / connected devices)."
+    },
+    {
+      "id": "pg-oralb",
+      "name": "Oral-B electric toothbrush",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "00DC"
+      },
+      "note": "Company ID 0x00DC is Procter & Gamble, the owner of Oral-B; their Bluetooth toothbrushes advertise with it."
+    },
+    {
+      "id": "name-beha-heater",
+      "name": "BEHA heater",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^beha"
+      },
+      "note": "Seen with the text 'Beha heater' in its manufacturer data."
+    },
+    {
+      "id": "oneplus",
+      "name": "OnePlus device (phone or earbuds)",
+      "layer": "Phone / PC",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "mfg": "072F"
+      }
+    },
+    {
+      "id": "google-fef3",
+      "name": "Google / Android device (service FEF3)",
+      "layer": "Phone / PC",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "service_data_uuid": "FEF3"
+      },
+      "note": "Service data with Google's member UUID FEF3. Google does not document it; most such advertisers are Android phones and Google devices nearby, rotating their address."
+    },
+    {
+      "id": "google-fcf1",
+      "name": "Google / Android device (service FCF1)",
+      "layer": "Phone / PC",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "service_data_uuid": "FCF1"
+      },
+      "note": "Service data with Google's member UUID FCF1 (registered 2022). Not documented; seen from Android devices."
+    },
+    {
+      "id": "google-fe9f",
+      "name": "Google device (service FE9F)",
+      "layer": "Phone / PC",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "service_data_uuid": "FE9F"
+      }
+    }
+  ]
+}

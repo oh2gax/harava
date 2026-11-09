@@ -1,0 +1,2008 @@
+#!/usr/bin/env python3
+"""
+Harava
+======
+Harava (Finnish for "rake") rakes through what your phone heard. It is a small local
+web app for the logs of the Fieldwatch Android app: it imports Fieldwatch log and Sit
+exports (CSV / JSON lines / KML) and lists, filters and maps the radios they contain.
+
+Run:   python harava.py        (or start_analyzer.bat; then open http://127.0.0.1:5057)
+
+Everything stays on this computer: the data goes into harava.db (SQLite) next to
+this file. Only the map tiles are loaded from the internet by the browser; Leaflet
+and Chart.js are bundled in static/vendor.
+
+Remember when reading the data: every latitude / longitude in a Fieldwatch log
+is where THIS PHONE was when it heard the radio, not where the radio is.
+"""
+
+import configparser
+import csv
+import hashlib
+import io
+import json
+import math
+import os
+import re
+import sqlite3
+import statistics
+import sys
+import threading
+import time
+import webbrowser
+import getpass
+import hmac
+import secrets
+from datetime import timedelta
+import xml.etree.ElementTree as ET
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+
+from flask import Flask, Response, abort, g, jsonify, redirect, render_template, request, send_from_directory, session
+from werkzeug.security import check_password_hash, generate_password_hash
+
+APP_NAME = "Harava"
+HERE = os.path.dirname(os.path.abspath(__file__))
+DOC_DIR = os.path.join(HERE, "doc")
+
+# ─────────────────────────── configuration ───────────────────────────
+
+CONFIG_DEFAULTS = {
+    "host": "127.0.0.1",
+    "port": "5057",
+    "database": "harava.db",
+    # Folder that "Scan folder" looks through (sub-folders included), relative to this
+    # project folder. Keep your Fieldwatch exports there: data/ is never committed to git.
+    "watch_folder": "data",
+    "open_browser": "true",
+    # A radio heard this far apart (metres) in at least two places is
+    # marked "travelled with me".
+    "travel_min_m": "500",
+    # Sign-in. Once a user exists (python harava.py --add-admin) every page needs a sign-in.
+    # require_login = true refuses to start without users (use it on a server).
+    "require_login": "false",
+    # true when Harava runs behind nginx with HTTPS: trust X-Forwarded-* and send cookies over HTTPS only
+    "behind_proxy": "false",
+    # how long "Keep me signed in" lasts
+    "session_days": "30",
+}
+
+
+def load_config():
+    cp = configparser.ConfigParser()
+    cp["app"] = CONFIG_DEFAULTS
+    cp.read(os.path.join(HERE, "config.ini"), encoding="utf-8")
+    c = cp["app"]
+    watch = c.get("watch_folder")
+    if not os.path.isabs(watch):
+        watch = os.path.normpath(os.path.join(HERE, watch))
+    db = c.get("database")
+    if not os.path.isabs(db):
+        db = os.path.join(HERE, db)
+    return {
+        "host": c.get("host"),
+        "port": c.getint("port"),
+        "db": db,
+        "watch_folder": watch,
+        "open_browser": c.getboolean("open_browser"),
+        "travel_min_m": c.getfloat("travel_min_m"),
+        "require_login": c.getboolean("require_login"),
+        "behind_proxy": c.getboolean("behind_proxy"),
+        "session_days": c.getint("session_days"),
+    }
+
+
+# CARTO Basemaps API key (removes the "API key required" watermark on the map).
+# Kept in api_keys.py next to this file, same as in wspr_logger; never commit or share that file.
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+try:
+    from api_keys import CARTO_API_KEY
+except ImportError:
+    CARTO_API_KEY = ""
+if not CARTO_API_KEY:
+    print("[WARN] No CARTO key: the map shows a watermark. "
+          "Copy api_keys.py.example to api_keys.py and add your key.")
+
+
+CFG = load_config()
+
+
+# ─────────────────────────── What's new and guides ───────────────────────────
+# doc/whats_new.md holds short notes for users, newest first, one section per day of development:
+#     ## v.09112026 — A headline in a few words
+#     - **Short lead** — one or two sentences of what changed.
+# The newest heading is the version shown under the app name (as in WSPR Logger).
+
+_WN_HEAD = re.compile(r"^##\s+v\.(\d{2})(\d{2})(\d{4})\s*(?:[—–-]+\s*(.*))?$")
+_WN_LEAD = re.compile(r"^\*\*(.+?)\*\*\s*(?:[—–:-]+\s*)?(.*)$")
+
+
+def parse_whats_new(text):
+    entries, cur, bullet = [], None, None
+
+    def flush():
+        nonlocal bullet
+        if bullet is not None and cur is not None:
+            t = " ".join(" ".join(bullet).split())
+            m = _WN_LEAD.match(t)
+            cur["items"].append({"lead": m.group(1).strip(), "text": m.group(2).strip()} if m
+                                else {"lead": "", "text": t})
+        bullet = None
+
+    for line in text.splitlines():
+        h = _WN_HEAD.match(line)
+        if h:
+            flush()
+            dd, mm, yyyy, head = h.groups()
+            cur = {"date": f"{yyyy}-{mm}-{dd}", "version": f"v.{dd}{mm}{yyyy}",
+                   "headline": (head or "").strip(), "items": []}
+            entries.append(cur)
+            continue
+        if line.startswith("- "):
+            flush()
+            bullet = [line[2:]]
+        elif bullet is not None:
+            if line.startswith("  ") and line.strip():
+                bullet.append(line.strip())
+            else:
+                flush()
+    flush()
+    entries = [e for e in entries if e["items"]]
+    entries.sort(key=lambda e: e["date"], reverse=True)
+    return entries
+
+
+def read_whats_new():
+    try:
+        with open(os.path.join(DOC_DIR, "whats_new.md"), encoding="utf-8") as fh:
+            return parse_whats_new(fh.read())
+    except OSError:
+        return []
+
+
+_wn = read_whats_new()
+APP_VERSION = _wn[0]["version"] if _wn else "v.dev"
+
+_PDF_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.pdf$")
+
+
+def list_guides():
+    """The PDFs in doc/, with title / description / date from doc/guides.json (which also sets the order)."""
+    manifest = []
+    try:
+        with open(os.path.join(DOC_DIR, "guides.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+        manifest = [g for g in data if isinstance(g, dict) and isinstance(g.get("file"), str)]
+    except (OSError, ValueError):
+        pass
+    meta = {g["file"]: g for g in manifest}
+    try:
+        present = {n for n in os.listdir(DOC_DIR)
+                   if _PDF_NAME.match(n) and os.path.isfile(os.path.join(DOC_DIR, n))}
+    except OSError:
+        return []
+    order = [g["file"] for g in manifest if g["file"] in present] + sorted(present - set(meta))
+    return [{"file": n, "title": str(meta.get(n, {}).get("title") or n[:-4].replace("_", " ")),
+             "description": str(meta.get(n, {}).get("description") or ""),
+             "date": str(meta.get(n, {}).get("date") or ""),
+             "size_kb": round(os.path.getsize(os.path.join(DOC_DIR, n)) / 1024)} for n in order]
+
+
+def move_old_database():
+    """Before the name Harava the database was fieldwatch.db: move it to harava.db once."""
+    new, old = CFG["db"], os.path.join(HERE, "fieldwatch.db")
+    if os.path.basename(new) != "harava.db" or os.path.exists(new) or not os.path.exists(old):
+        return
+    try:
+        con = sqlite3.connect(old)
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        con.close()
+        os.replace(old, new)
+        for ext in ("-wal", "-shm"):
+            try:
+                os.remove(old + ext)
+            except OSError:
+                pass
+        print("  moved fieldwatch.db to harava.db (the new name of the app)")
+    except (OSError, sqlite3.Error) as e:
+        CFG["db"] = old
+        print(f"[WARN] could not rename fieldwatch.db to harava.db ({e}); using fieldwatch.db as it is")
+
+# Signature name -> class (FINDER, VEHICLE, PHONE ...) from the Fieldwatch catalog.
+try:
+    with open(os.path.join(HERE, "signature_classes.json"), encoding="utf-8") as fh:
+        SIG_CLASS = json.load(fh)["classes"]
+except Exception:
+    SIG_CLASS = {}
+
+# Signature class -> the category shown in the app. The first match in
+# CLASS_PRIORITY wins when a radio matched several signatures.
+# Every class is its own map layer (the front end lists the same names in CAT).
+CLASS_CATEGORY = {
+    "GLASSES": "Glasses & VR",
+    "FINDER": "Tracker",
+    "SURVEILLANCE": "Surveillance",
+    "LAW_ENFORCEMENT": "Police / body cam",
+    "DRONE": "Drone",
+    "HACKING": "Hacking tool",
+    "PHONE": "Phone / PC",
+    "AUDIO": "Audio",
+    "WEARABLE": "Wearable",
+    "HEALTH": "Health",
+    "VEHICLE": "Vehicle",
+    "CAMERA": "Camera",
+    "LOCK": "Smart lock",
+    "HOME": "Home & IoT",
+    "THERMOSTAT": "Thermostat",
+    "SIGNAGE": "Shelf label / sign",
+    "BEACON": "Beacon",
+    "MESH": "Mesh radio",
+    "ISP": "Network",
+}
+CLASS_PRIORITY = ["HACKING", "SURVEILLANCE", "LAW_ENFORCEMENT", "DRONE", "GLASSES", "FINDER",
+                  "VEHICLE", "CAMERA", "LOCK", "MESH", "WEARABLE", "HEALTH", "AUDIO", "HOME",
+                  "THERMOSTAT", "SIGNAGE", "BEACON", "PHONE", "ISP"]
+# Glasses and VR headsets share one layer. Meta uses the same Bluetooth ID (0x058E / FEB8) for
+# Ray-Ban glasses and Quest headsets; a name like this tells that it is probably a headset.
+VR_NAME = re.compile(r"\bquest\b|oculus|\bpico\b|vision pro|valve index|\bvive\b", re.I)
+VEHICLE_NAME = re.compile(r"polestar|tesla|obdlink|mitsubishi|audi_mmi|mbux|bmw|volvo|skoda|"
+                          r"vw_|toyota|my ?car|carplay", re.I)
+
+# ─────────────────────────── database ───────────────────────────
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS imports (
+    id          INTEGER PRIMARY KEY,
+    filename    TEXT NOT NULL,
+    path        TEXT,
+    sha1        TEXT UNIQUE NOT NULL,
+    ftype       TEXT NOT NULL,
+    rows        INTEGER DEFAULT 0,
+    path_pts    INTEGER DEFAULT 0,
+    first_ts    INTEGER,
+    last_ts     INTEGER,
+    imported_at TEXT,
+    active      INTEGER DEFAULT 1,
+    note        TEXT
+);
+CREATE TABLE IF NOT EXISTS hears (
+    id        INTEGER PRIMARY KEY,
+    import_id INTEGER NOT NULL,
+    ts        INTEGER,
+    kind      TEXT,
+    mac       TEXT,
+    name      TEXT,
+    rssi      INTEGER,
+    channel   INTEGER,
+    freq      INTEGER,
+    oui       TEXT,
+    vendor    TEXT,
+    fleets    TEXT,
+    mfg       TEXT,
+    uuids     TEXT,
+    flags     TEXT,
+    raw       TEXT,
+    lat       REAL,
+    lon       REAL,
+    vendor_ie TEXT,
+    UNIQUE(import_id, ts, kind, mac, rssi)
+);
+CREATE INDEX IF NOT EXISTS ix_hears_ts  ON hears(ts);
+CREATE INDEX IF NOT EXISTS ix_hears_dev ON hears(kind, mac);
+CREATE TABLE IF NOT EXISTS paths (
+    import_id INTEGER NOT NULL,
+    part      INTEGER,
+    seq       INTEGER,
+    ts        INTEGER,
+    lat       REAL,
+    lon       REAL
+);
+CREATE INDEX IF NOT EXISTS ix_paths_imp ON paths(import_id);
+-- "My devices": rules for radios that are your own (hidden from lists, map and phone check)
+CREATE TABLE IF NOT EXISTS own_devices (
+    id       INTEGER PRIMARY KEY,
+    label    TEXT NOT NULL,
+    kind     TEXT DEFAULT '',      -- '' = any, 'WIFI' or 'BLE'
+    match    TEXT NOT NULL,        -- mac | mac_prefix | name | name_contains
+    value    TEXT NOT NULL,
+    created  TEXT
+);
+"""
+
+_db_lock = threading.Lock()
+
+
+def db():
+    con = sqlite3.connect(CFG["db"], timeout=30)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def init_db():
+    with db() as con:
+        con.executescript(SCHEMA)
+        con.execute("PRAGMA journal_mode=WAL")
+        # v1.1: Sit export rows are one row per radio, with a hit count and a first..last span
+        have = {r[1] for r in con.execute("PRAGMA table_info(hears)")}
+        for col, decl in (("src", "TEXT DEFAULT 'log'"), ("hits", "INTEGER DEFAULT 1"),
+                          ("last_ts", "INTEGER"), ("rssi_min", "INTEGER")):
+            if col not in have:
+                con.execute(f"ALTER TABLE hears ADD COLUMN {col} {decl}")
+        con.execute("UPDATE hears SET src='kml' WHERE src='log' AND import_id IN "
+                    "(SELECT id FROM imports WHERE ftype='kml')")
+
+
+# ─────────────────────────── helpers ───────────────────────────
+
+ILLEGAL_XML = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+MAC_RE = re.compile(r"\b([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\b")
+TAG_RE = re.compile(r"<[^>]+>")
+
+
+def clean_text(s):
+    """Drop characters XML / JSON cannot carry (hidden SSIDs are often NUL bytes)."""
+    if s is None:
+        return ""
+    return ILLEGAL_XML.sub("", str(s))
+
+
+def clean_name(s):
+    s = clean_text(s).strip()
+    if s.lower() in ("<hidden>", "(hidden ssid)", "(hidden)", "hidden"):
+        return ""
+    return s
+
+
+def to_int(v, default=None):
+    try:
+        if v is None or v == "":
+            return default
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def to_float(v):
+    try:
+        if v is None or v == "" or str(v).lower() == "null":
+            return None
+        f = float(v)
+        return None if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def iso_to_ms(s):
+    if not s:
+        return None
+    s = s.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+def haversine_m(lat1, lon1, lat2, lon2):
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def freq_band(freq, kind):
+    if kind != "WIFI" or not freq:
+        return ""
+    if freq < 3000:
+        return "2.4 GHz"
+    if freq < 5925:
+        return "5 GHz"
+    return "6 GHz"
+
+
+def norm_hear(d):
+    """Return a hear dict with every column, normalised."""
+    kind = (d.get("kind") or "").upper().replace("-", "")
+    if kind not in ("WIFI", "BLE"):
+        kind = "BLE" if "BLE" in kind else ("WIFI" if "WIFI" in kind else kind or "BLE")
+    mac = (d.get("mac") or "").upper()
+    lat, lon = to_float(d.get("lat")), to_float(d.get("lon"))
+    if lat is not None and lon is not None and abs(lat) < 1e-9 and abs(lon) < 1e-9:
+        lat = lon = None
+    return {
+        "ts": to_int(d.get("ts")),
+        "kind": kind,
+        "mac": mac,
+        "name": clean_name(d.get("name")),
+        "rssi": to_int(d.get("rssi")),
+        "channel": to_int(d.get("channel"), 0),
+        "freq": to_int(d.get("freq"), 0),
+        "oui": (d.get("oui") or mac[:8]).upper(),
+        "vendor": clean_text(d.get("vendor")).strip(),
+        "fleets": clean_text(d.get("fleets")).strip(),
+        "mfg": clean_text(d.get("mfg")).strip(),
+        "uuids": clean_text(d.get("uuids")).strip(),
+        "flags": clean_text(d.get("flags")).strip(),
+        "raw": clean_text(d.get("raw")).strip(),
+        "lat": lat,
+        "lon": lon,
+        "vendor_ie": clean_text(d.get("vendor_ie")).strip(),
+        "src": d.get("src") or "log",
+        "hits": to_int(d.get("hits"), 1),
+        "last_ts": to_int(d.get("last_ts")),
+        "rssi_min": to_int(d.get("rssi_min")),
+    }
+
+
+# ─────────────────────────── importers ───────────────────────────
+
+SIT_MARKERS = ("first_seen", "hits")
+
+
+def _truthy(v):
+    return str(v).strip().lower() in ("true", "1", "yes")
+
+
+def sit_row_to_hear(o):
+    """One row of a Fieldwatch *Sit export* (CSV or JSON lines): one radio for the whole sit.
+    Stored as one hear at first_seen that spans to last_seen, with the loudest signal and hear-point."""
+    flags = []
+    if _truthy(o.get("randomized")):
+        flags.append("RAND")
+    if _truthy(o.get("hidden")):
+        flags.append("HIDDEN")
+    sigs = [s.strip() for s in str(o.get("signatures") or "").split(";") if s.strip()]
+    h = norm_hear({
+        "ts": iso_to_ms(o.get("first_seen")), "last_ts": iso_to_ms(o.get("last_seen")),
+        "kind": o.get("kind"), "mac": o.get("mac"), "name": o.get("name"),
+        "rssi": o.get("rssi_max") if o.get("rssi_max") not in (None, "") else o.get("rssi"),
+        "rssi_min": o.get("rssi_min"), "hits": o.get("hits"),
+        "channel": o.get("channel"), "freq": o.get("frequency_mhz"),
+        "fleets": "+".join(sigs), "flags": " ".join(flags),
+        "lat": o.get("lat"), "lon": o.get("lon"), "src": "sit",
+    })
+    mine = None
+    if _truthy(o.get("mine")):
+        label = clean_text(o.get("custom_name")).strip() or h["name"] or h["mac"]
+        mine = {"kind": h["kind"], "mac": h["mac"], "label": label}
+    return h, mine
+
+CSV_HEADER = "timestamp,iso,kind,mac,name,rssi,channel,freq,oui,vendor,fleets,mfg,uuids,flags,raw,lat,lon,vendor_ie".split(",")
+
+
+def parse_csv(text):
+    hears, mine = [], []
+    text = text.replace("\x00", "")
+    header = CSV_HEADER
+    sit = False
+    for row in csv.reader(io.StringIO(text)):
+        if not row:
+            continue
+        if row[0].strip().lower() in ("timestamp", "kind"):
+            header = [h.strip().lower() for h in row]
+            sit = all(m in header for m in SIT_MARKERS)
+            continue
+        d = dict(zip(header, row))
+        if sit:
+            h, m = sit_row_to_hear(d)
+            if h["mac"] and h["ts"]:
+                hears.append(h)
+                if m:
+                    mine.append(m)
+            continue
+        ts = to_int(d.get("timestamp")) or iso_to_ms(d.get("iso"))
+        d["ts"] = ts
+        h = norm_hear(d)
+        if h["mac"] and h["ts"]:
+            hears.append(h)
+    return hears, [], mine
+
+
+def parse_jsonl(text):
+    hears, mine = [], []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if all(m in o for m in SIT_MARKERS):
+            h, m = sit_row_to_hear(o)
+            if h["mac"] and h["ts"]:
+                hears.append(h)
+                if m:
+                    mine.append(m)
+            continue
+        flags = []
+        if o.get("rand"):
+            flags.append("RAND")
+        if o.get("hidden"):
+            flags.append("HIDDEN")
+        mfg = o.get("mfg")
+        d = dict(o)
+        d["ts"] = o.get("ts") or iso_to_ms(o.get("iso"))
+        d["mfg"] = format(mfg, "X") if isinstance(mfg, int) else (mfg or "")
+        d["uuids"] = (o.get("uuids") or "").replace(",", "|")
+        d["flags"] = o.get("flags") or " ".join(flags)
+        d["src"] = "log"
+        d["hits"] = 1
+        h = norm_hear(d)
+        if h["mac"] and h["ts"]:
+            hears.append(h)
+    return hears, [], mine
+
+
+def _strip_ns(root):
+    for el in root.iter():
+        if isinstance(el.tag, str) and "}" in el.tag:
+            el.tag = el.tag.split("}", 1)[1]
+
+
+def _parse_kml_desc(name, desc, folder):
+    """Read one KML placemark description. Works with Fieldwatch's own KML
+    ('WIFI AA:BB:.. · vendor · -78 dBm · ch 11 · ...') and with the analysis KML."""
+    text = TAG_RE.sub("\n", desc or "")
+    m = MAC_RE.search(text) or MAC_RE.search(name or "")
+    if not m:
+        return None
+    mac = m.group(1).upper()
+    ctx = f"{text} {name} {folder}"
+    if re.search(r"\bWIFI\b|Wi-?Fi", ctx, re.I):
+        kind = "WIFI"
+    elif re.search(r"\bBLE\b", ctx):
+        kind = "BLE"
+    else:
+        kind = "WIFI" if re.search(r"\bch \d+|MHz", text) else "BLE"
+    rssi = None
+    r = re.search(r"(-\d{2,3})\s*dBm", text)
+    if r:
+        rssi = int(r.group(1))
+    channel = 0
+    c = re.search(r"\bch (\d+)", text)
+    if c:
+        channel = int(c.group(1))
+    freq = 0
+    f = re.search(r"(\d{4}) MHz", text)
+    if f:
+        freq = int(f.group(1))
+    vendor, fleets = "", []
+    segs = [s.strip() for s in re.split(r"\s·\s|\n", text) if s.strip()]
+    for s in segs:
+        if MAC_RE.search(s) or "dBm" in s or s.startswith(("ch ", "Heard", "Observer", "log rows", "loudest")):
+            continue
+        parts = [p.strip() for p in re.split(r",\s*|\+", s) if p.strip()]
+        if parts and all(p in SIG_CLASS for p in parts):
+            fleets.extend(parts)
+        elif not vendor and len(s) < 60 and not re.search(r"\d{2}:\d{2}:\d{2}", s):
+            vendor = s
+    nm = clean_name(name)
+    if MAC_RE.fullmatch(nm or "x") or nm.upper() == mac or re.match(r"^(BLE|Wi-?Fi)$", nm, re.I):
+        nm = ""
+    # names in the analysis KML can carry " -78 dBm" at the end
+    nm = re.sub(r"\s-?\d{2,3} dBm$", "", nm)
+    if nm in SIG_CLASS or "+" in nm and all(p in SIG_CLASS for p in nm.split("+")):
+        fleets.extend(nm.split("+"))
+        nm = ""
+    return {"kind": kind, "mac": mac, "name": nm, "rssi": rssi, "channel": channel,
+            "freq": freq, "vendor": vendor, "fleets": "+".join(dict.fromkeys(fleets))}
+
+
+def parse_kml(text):
+    text = ILLEGAL_XML.sub("", text)
+    root = ET.fromstring(text.encode("utf-8"))
+    _strip_ns(root)
+    hears, paths = [], []
+
+    def walk(el, folder):
+        for ch in el:
+            tag = ch.tag
+            if tag in ("Folder", "Document"):
+                fn = ch.findtext("name") or ""
+                walk(ch, (folder + " / " + fn) if folder else fn)
+            elif tag == "Placemark":
+                name = ch.findtext("name") or ""
+                desc = ch.findtext("description") or ""
+                when = ch.findtext("TimeStamp/when") or ch.findtext("TimeSpan/begin")
+                ts = iso_to_ms(when)
+                ls = ch.find(".//LineString/coordinates")
+                if ls is not None and ls.text:
+                    pts = []
+                    for tok in ls.text.split():
+                        xy = tok.split(",")
+                        if len(xy) >= 2:
+                            lon, lat = to_float(xy[0]), to_float(xy[1])
+                            if lat is not None and lon is not None:
+                                pts.append((lat, lon))
+                    if len(pts) > 1:
+                        paths.append({"name": name, "ts": ts, "pts": pts})
+                    continue
+                pt = ch.find(".//Point/coordinates")
+                if pt is None or not pt.text:
+                    continue
+                xy = pt.text.strip().split(",")
+                lon, lat = to_float(xy[0]), to_float(xy[1]) if len(xy) > 1 else None
+                info = _parse_kml_desc(name, desc, folder)
+                if not info:
+                    continue
+                info.update({"ts": ts, "lat": lat, "lon": lon, "src": "kml"})
+                hears.append(norm_hear(info))
+
+    walk(root, "")
+    return hears, paths, []
+
+
+def detect_type(filename, text):
+    fn = filename.lower()
+    if fn.endswith(".kml"):
+        return "kml"
+    if fn.endswith((".jsonl", ".json")):
+        return "jsonl"
+    if fn.endswith(".csv"):
+        return "csv"
+    head = text.lstrip()[:200]
+    if head.startswith("<"):
+        return "kml"
+    if head.startswith("{"):
+        return "jsonl"
+    return "csv"
+
+
+def import_bytes(filename, data, path=None):
+    sha1 = hashlib.sha1(data).hexdigest()
+    with db() as con:
+        old = con.execute("SELECT id, filename FROM imports WHERE sha1=?", (sha1,)).fetchone()
+        if old:
+            return {"file": filename, "status": "skipped", "reason": f"already imported as {old['filename']}"}
+    text = data.decode("utf-8", errors="replace").lstrip("﻿")
+    ftype = detect_type(filename, text)
+    try:
+        if ftype == "kml":
+            hears, paths, mine = parse_kml(text)
+        elif ftype == "jsonl":
+            hears, paths, mine = parse_jsonl(text)
+        else:
+            hears, paths, mine = parse_csv(text)
+    except ET.ParseError as e:
+        return {"file": filename, "status": "error", "reason": f"KML could not be read: {e}"}
+    except Exception as e:  # noqa: BLE001 – report anything to the user
+        return {"file": filename, "status": "error", "reason": str(e)}
+    if not hears and not paths:
+        return {"file": filename, "status": "error", "reason": "no Fieldwatch rows found"}
+    if hears and all(h["src"] == "sit" for h in hears):
+        ftype = "sit"            # a Sit export (one row per radio), CSV or JSON lines
+    ts_list = ([h["ts"] for h in hears if h["ts"]] + [h["last_ts"] for h in hears if h["last_ts"]]
+               + [p["ts"] for p in paths if p["ts"]])
+    first_ts, last_ts = (min(ts_list), max(ts_list)) if ts_list else (None, None)
+    with _db_lock, db() as con:
+        cur = con.execute(
+            "INSERT INTO imports(filename, path, sha1, ftype, rows, path_pts, first_ts, last_ts, imported_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (filename, path, sha1, ftype, 0, 0, first_ts, last_ts,
+             datetime.now().isoformat(timespec="seconds")))
+        iid = cur.lastrowid
+        cols = ["ts", "kind", "mac", "name", "rssi", "channel", "freq", "oui", "vendor", "fleets",
+                "mfg", "uuids", "flags", "raw", "lat", "lon", "vendor_ie", "src", "hits", "last_ts", "rssi_min"]
+        con.executemany(
+            f"INSERT OR IGNORE INTO hears(import_id,{','.join(cols)}) VALUES (?,{','.join('?' * len(cols))})",
+            [(iid, *[h[c] for c in cols]) for h in hears])
+        n = con.execute("SELECT COUNT(*) FROM hears WHERE import_id=?", (iid,)).fetchone()[0]
+        npts = 0
+        for part, p in enumerate(paths):
+            con.executemany("INSERT INTO paths(import_id, part, seq, ts, lat, lon) VALUES (?,?,?,?,?,?)",
+                            [(iid, part, i, p["ts"], la, lo) for i, (la, lo) in enumerate(p["pts"])])
+            npts += len(p["pts"])
+        con.execute("UPDATE imports SET rows=?, path_pts=? WHERE id=?", (n, npts, iid))
+        notes = [_avoid_double_counting(con, iid, ftype, first_ts, last_ts)]
+        if mine:
+            added = _add_mine_rules(con, mine)
+            if added:
+                notes.append(f"{added} radio(s) marked Mine in Fieldwatch added to My devices")
+    r = {"file": filename, "status": "imported", "type": ftype, "rows": n, "path_pts": npts}
+    note = "; ".join(x for x in notes if x)
+    if note:
+        r["note"] = note
+    return r
+
+
+def _add_mine_rules(con, mine):
+    added = 0
+    for m in mine:
+        if con.execute("SELECT 1 FROM own_devices WHERE match='mac' AND value=? AND kind IN ('', ?)",
+                       (m["mac"], m["kind"])).fetchone():
+            continue
+        con.execute("INSERT INTO own_devices(label, kind, match, value, created) VALUES (?,?,?,?,?)",
+                    (m["label"], m["kind"], "mac", m["mac"], datetime.now().isoformat(timespec="seconds")))
+        added += 1
+    return added
+
+
+def _avoid_double_counting(con, iid, ftype, first_ts, last_ts):
+    """Keep counts clean when files of the same time are imported:
+    - a KML repeats radios that a log or Sit export of the same time already has -> the KML is switched off;
+    - a newer export of the same (still running) sit replaces the older one -> the older is switched off.
+    A log and a Sit export of the same time stay on together: the log has the timeline, the sit every radio.
+    Anything switched off can be switched on again in Imports."""
+    if not first_ts or not last_ts:
+        return ""
+    overlap = ("SELECT id FROM imports WHERE id<>? AND active=1 AND {}"
+               " AND first_ts <= ? AND last_ts >= ?")
+    args = (iid, last_ts, first_ts)
+    if ftype == "kml":
+        if con.execute(overlap.format("ftype<>'kml'"), args).fetchone():
+            con.execute("UPDATE imports SET active=0 WHERE id=?", (iid,))
+            return "switched off: a log or sit of the same time is already imported"
+        return ""
+    msgs = []
+    ids = [r[0] for r in con.execute(overlap.format("ftype='kml'"), args)]
+    if ids:
+        con.execute(f"UPDATE imports SET active=0 WHERE id IN ({','.join('?' * len(ids))})", ids)
+        msgs.append(f"switched off {len(ids)} KML file(s) of the same time")
+    if ftype == "sit":
+        older = [r[0] for r in con.execute(overlap.format("ftype='sit'"), args)]
+        if older:
+            con.execute(f"UPDATE imports SET active=0 WHERE id IN ({','.join('?' * len(older))})", older)
+            msgs.append(f"replaces {len(older)} earlier export(s) of the same sit (switched off)")
+    return "; ".join(msgs)
+
+
+# Folders that Scan folder never enters (the app's own folders, also when the scan folder is the project root)
+SCAN_SKIP_DIRS = {".git", "__pycache__", "static", "templates", "doc", "venv", ".venv", "env",
+                  "node_modules", "tmp_files", "ids", "tools"}
+
+
+def scan_folder(folder):
+    results = []
+    for dirpath, dirnames, filenames in os.walk(folder):
+        dirnames[:] = sorted(d for d in dirnames if d not in SCAN_SKIP_DIRS and not d.startswith("."))
+        for fn in sorted(filenames):
+            if not fn.lower().endswith((".csv", ".jsonl", ".kml")):
+                continue
+            if fn.lower().startswith("devices-export"):
+                continue
+            p = os.path.join(dirpath, fn)
+            try:
+                with open(p, "rb") as fh:
+                    data = fh.read()
+            except OSError as e:
+                results.append({"file": fn, "status": "error", "reason": str(e)})
+                continue
+            r = import_bytes(fn, data, p)
+            r["folder"] = os.path.relpath(dirpath, folder)
+            results.append(r)
+    return results
+
+
+# ─────────────────────────── Harava identification database ───────────────────────────
+# ids/bt_assigned_numbers.json : Bluetooth SIG company IDs, 16-bit UUIDs and AD types
+#                                (refresh with tools/update_bt_numbers.py)
+# ids/harava_ids.json          : Harava's own rules for radios Fieldwatch leaves unidentified
+
+IDS_DIR = os.path.join(HERE, "ids")
+BT = {"companies": {}, "uuids": {}, "ad_types": {}}
+HV = {"rules": []}
+HV_RULES = []
+
+
+NAME_RULE_IDS = set()     # rules that need a name; used when a nameless address takes its group's name
+
+
+def load_ids():
+    """(Re)load both identification files; returns a short status for the Identification page."""
+    global BT, HV, HV_RULES
+    status = {}
+    for fn, target in (("bt_assigned_numbers.json", "bt"), ("harava_ids.json", "hv")):
+        try:
+            with open(os.path.join(IDS_DIR, fn), encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as e:
+            status[fn] = f"not loaded: {e}"
+            continue
+        if target == "bt":
+            BT = {k: data.get(k, {}) for k in ("companies", "uuids", "ad_types")}
+            BT["source"], BT["fetched"] = data.get("source", ""), data.get("fetched", "")
+        else:
+            HV = data
+        status[fn] = "ok"
+    rules = []
+    for r in HV.get("rules", []):
+        m = dict(r.get("match", {}))
+        if m.get("name_regex"):
+            try:
+                m["_name_re"] = re.compile(m["name_regex"], re.I)
+            except re.error as e:
+                status.setdefault("rule errors", []).append(f"{r.get('id')}: {e}")
+                continue
+        for k in ("mfg", "service_data_uuid"):
+            if m.get(k):
+                m[k] = m[k].upper().zfill(4)
+        for k in ("mfg_data_prefix", "ad_data_prefix", "ad_type"):
+            if m.get(k):
+                m[k] = m[k].upper()
+        if m.get("service_uuid_any"):
+            m["service_uuid_any"] = {u.upper().zfill(4) for u in m["service_uuid_any"]}
+        if m.get("uuid128_any"):
+            m["uuid128_any"] = {u.upper() for u in m["uuid128_any"]}
+        rules.append({**r, "_m": m})
+    HV_RULES = rules
+    NAME_RULE_IDS.clear()
+    NAME_RULE_IDS.update(r["id"] for r in rules if r["_m"].get("name_regex"))
+    return status
+
+
+def parse_ad(raw_hex):
+    """Split a raw advertisement into [(type 'XX', data bytes)]; None when it is not one."""
+    try:
+        b = bytes.fromhex(raw_hex)
+    except ValueError:
+        return None
+    out, i = [], 0
+    while i < len(b):
+        n = b[i]
+        if n == 0:
+            break
+        if i + 1 >= len(b):
+            return out or None
+        out.append((format(b[i + 1], "02X"), b[i + 2:i + 1 + n]))   # the last one may be cut short (CSV keeps 40 bytes)
+        i += 1 + n
+    return out or None
+
+
+def _uuid16(u):
+    u = (u or "").strip().upper()
+    if re.fullmatch(r"[0-9A-F]{4}", u):
+        return u
+    m = re.fullmatch(r"0000([0-9A-F]{4})-0000-1000-8000-00805F9B34FB", u)
+    return m.group(1) if m else None
+
+
+def adv_features(mfg, raw, uuids):
+    """What the advertisement says: company + manufacturer data, AD structures, service data, service UUIDs."""
+    f = {"mfg": "", "mfg_data": b"", "ads": [], "sd": {}, "svc": set(), "uuid128": []}
+    raw = (raw or "").strip().upper()
+    if mfg:
+        f["mfg"] = mfg.upper().zfill(4)
+        try:
+            f["mfg_data"] = bytes.fromhex(raw)       # with manufacturer data, Fieldwatch's raw is that data
+        except ValueError:
+            pass
+    elif raw:
+        ads = parse_ad(raw) or []                    # without it, raw is the whole advertisement
+        f["ads"] = ads
+        for t, data in ads:
+            if t == "16" and len(data) >= 2:
+                f["sd"][format(int.from_bytes(data[:2], "little"), "04X")] = data[2:]
+            elif t in ("02", "03"):
+                for k in range(0, len(data) - 1, 2):
+                    f["svc"].add(format(int.from_bytes(data[k:k + 2], "little"), "04X"))
+            elif t in ("06", "07", "21") and len(data) >= 16:      # 128-bit service UUIDs / service data
+                u = data[:16][::-1].hex().upper()
+                f["uuid128"].append(f"{u[:8]}-{u[8:12]}-{u[12:16]}-{u[16:20]}-{u[20:]}")
+            elif t == "FF" and len(data) >= 2 and not f["mfg"]:
+                f["mfg"] = format(int.from_bytes(data[:2], "little"), "04X")
+                f["mfg_data"] = data[2:]
+    for u in (uuids or "").replace(",", "|").split("|"):
+        u16 = _uuid16(u)
+        if u16:
+            f["svc"].add(u16)
+        elif re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", u.strip()):
+            if u.strip().upper() not in f["uuid128"]:
+                f["uuid128"].append(u.strip().upper())
+    f["svc"].update(f["sd"].keys())
+    return f
+
+
+def _rule_matches(m, kind, name, f):
+    if m.get("kind") and m["kind"] != kind:
+        return False
+    if m.get("_name_re") and not m["_name_re"].search(name or ""):
+        return False
+    if m.get("mfg") and f["mfg"] != m["mfg"]:
+        return False
+    if m.get("mfg_data_prefix") and not f["mfg_data"].hex().upper().startswith(m["mfg_data_prefix"]):
+        return False
+    if m.get("ad_type"):
+        hit = [d for t, d in f["ads"] if t == m["ad_type"]]
+        if not hit:
+            return False
+        if m.get("ad_data_prefix") and not any(d.hex().upper().startswith(m["ad_data_prefix"]) for d in hit):
+            return False
+    if m.get("service_data_uuid") and m["service_data_uuid"] not in f["sd"]:
+        return False
+    if m.get("service_uuid_any") and not (m["service_uuid_any"] & f["svc"]):
+        return False
+    if m.get("uuid128_any") and not (m["uuid128_any"] & set(f["uuid128"])):
+        return False
+    return True
+
+
+def identify(kind, name, mfg, raw, uuids):
+    """Harava's identification of one radio: {'id','name','layer','confidence','note','company','group'}."""
+    f = adv_features(mfg, raw, uuids) if kind == "BLE" else {"mfg": "", "mfg_data": b"", "ads": [], "sd": {}, "svc": set(), "uuid128": []}
+    custom = next((u for u in f["uuid128"] if not u.endswith("-0000-1000-8000-00805F9B34FB")), "")
+    company = BT["companies"].get(f["mfg"], "") if f["mfg"] else ""
+    if not company:
+        for u in sorted(f["svc"]):
+            e = BT["uuids"].get(u)
+            if e and e.get("kind") == "member":
+                company = e["name"]
+                break
+    for r in HV_RULES:
+        if _rule_matches(r["_m"], kind, name, f):
+            group = ""
+            g = r.get("group")
+            if g:
+                if g.get("source") == "mfg":
+                    src = f["mfg_data"]
+                elif g.get("source") == "service_data":
+                    src = f["sd"].get(g.get("uuid", "").upper(), b"")
+                else:
+                    src = next((d for t, d in f["ads"] if t == g.get("ad_type", "").upper()), b"")
+                part = src[g.get("from", 0):g.get("to", len(src))]
+                if part:                                  # rules with the same group key share groups
+                    group = f"{g.get('key', r['id'])}:{part.hex().upper()}"
+            if not group and custom:
+                group = f"uuid128:{custom}"
+            return {"id": r["id"], "name": r["name"], "layer": r.get("layer", ""),
+                    "confidence": r.get("confidence", "low"), "note": r.get("note", ""),
+                    "company": company, "group": group}
+    if company:                                       # no rule: at least say whose radio it is
+        return {"id": "company", "name": f"{company} device", "layer": "", "confidence": "low",
+                "note": "Only the company is known (Bluetooth SIG company ID or member UUID).",
+                "company": company, "group": f"uuid128:{custom}" if custom else ""}
+    if custom:                                        # a vendor's own 128-bit service: same kind of device
+        return {"id": "custom-uuid", "name": f"Device with custom service {custom[:8]}…", "layer": "",
+                "confidence": "low",
+                "note": f"Advertises the 128-bit service UUID {custom}, which is not a Bluetooth SIG number. "
+                        "Radios with the same UUID are the same kind of device, often one device under changing addresses.",
+                "company": "", "group": f"uuid128:{custom}"}
+    return None
+
+
+load_ids()
+
+
+# ─────────────────────────── analysis ───────────────────────────
+
+def classify(fleets, name, kind):
+    names = [f for f in (fleets or "").split("+") if f]
+    classes = [SIG_CLASS.get(f, "") for f in names]
+    for c in CLASS_PRIORITY:
+        if c in classes:
+            return c, CLASS_CATEGORY[c]
+    if kind == "BLE" and VR_NAME.search(name or ""):
+        return "GLASSES", CLASS_CATEGORY["GLASSES"]
+    if VEHICLE_NAME.search(name or ""):
+        return "VEHICLE", "Vehicle"
+    if kind == "WIFI":
+        return "ISP", "Network"
+    return "", "Unidentified"
+
+
+def tracker_mode(raw, fleets):
+    raw = (raw or "").upper()
+    f = fleets or ""
+    if "Find Hub" in f and "16AAFE" in raw:
+        b = raw.split("16AAFE", 1)[1][:2]
+        return {"41": "separated", "40": "nearby"}.get(b, "")
+    if "DULT" in f and "16B2FC" in raw:
+        b = raw.split("16B2FC", 1)[1][2:4]
+        try:
+            return "near owner" if int(b, 16) & 1 else "separated"
+        except ValueError:
+            return ""
+    if "AirTag" in f or raw.startswith("12"):
+        if raw.startswith("1219"):
+            return "separated"
+        if raw.startswith("1202"):
+            return "near owner"
+    return ""
+
+
+def ruuvi_decode(raw):
+    try:
+        b = bytes.fromhex(raw)
+    except ValueError:
+        return None
+    if len(b) < 15 or b[0] != 5:
+        return None
+    t = int.from_bytes(b[1:3], "big", signed=True) * 0.005
+    hum = int.from_bytes(b[3:5], "big") * 0.0025
+    pres = (int.from_bytes(b[5:7], "big") + 50000) / 100
+    batt = (int.from_bytes(b[13:15], "big") >> 5) + 1600
+    return {"temp_c": round(t, 2), "humidity": round(hum, 1), "pressure_hpa": round(pres, 1),
+            "battery_mv": batt}
+
+
+def active_import_ids(con):
+    return [r[0] for r in con.execute("SELECT id FROM imports WHERE active=1")]
+
+
+def query_hears(con, t_from=None, t_to=None, kind=None, mac=None, no_sit=False):
+    ids = active_import_ids(con)
+    if not ids:
+        return []
+    where = [f"import_id IN ({','.join('?' * len(ids))})"]
+    args = list(ids)
+    if t_from:
+        # a Sit-export row covers first..last seen, so it counts when that span overlaps the range
+        where.append("COALESCE(last_ts, ts) >= ?")
+        args.append(t_from)
+    if t_to:
+        where.append("ts < ?")
+        args.append(t_to)
+    if kind:
+        where.append("kind = ?")
+        args.append(kind)
+    if mac:
+        where.append("mac = ?")
+        args.append(mac)
+    if no_sit:
+        where.append("COALESCE(src, 'log') <> 'sit'")
+    sql = ("SELECT ts, kind, mac, MAX(name) name, rssi, MAX(channel) channel, MAX(freq) freq, MAX(oui) oui,"
+           " MAX(vendor) vendor, MAX(fleets) fleets, MAX(mfg) mfg, MAX(uuids) uuids, MAX(flags) flags,"
+           " MAX(raw) raw, MAX(lat) lat, MAX(lon) lon, MAX(vendor_ie) vendor_ie,"
+           " COALESCE(src, 'log') src, MAX(COALESCE(hits, 1)) hits, MAX(last_ts) last_ts, MIN(rssi_min) rssi_min"
+           f" FROM hears WHERE {' AND '.join(where)}"
+           " GROUP BY ts, kind, mac, rssi, COALESCE(src, 'log') ORDER BY ts")
+    return [dict(r) for r in con.execute(sql, args)]
+
+
+def build_devices(hears):
+    groups = defaultdict(list)
+    for h in hears:
+        groups[(h["kind"], h["mac"])].append(h)
+    out = []
+    for (kind, mac), hs in groups.items():
+        names = Counter(h["name"] for h in hs if h["name"])
+        fleets = []
+        for h in hs:
+            for f in (h["fleets"] or "").split("+"):
+                if f and f not in fleets:
+                    fleets.append(f)
+        fleet_s = "+".join(fleets)
+        name = names.most_common(1)[0][0] if names else ""
+        cls, cat = classify(fleet_s, name, kind)
+        log_hs = [h for h in hs if h["src"] != "sit"]
+        sit_hs = [h for h in hs if h["src"] == "sit"]
+        rssis = [h["rssi"] for h in hs if h["rssi"] is not None]
+        log_rssis = [h["rssi"] for h in log_hs if h["rssi"] is not None] or rssis
+        sit_hits = sum(h["hits"] or 1 for h in sit_hs)
+        sit_min = min((h["rssi_min"] for h in sit_hs if h["rssi_min"] is not None), default=None)
+        located = [h for h in hs if h["lat"] is not None and h["lon"] is not None]
+        loud = max(located, key=lambda h: (h["rssi"] if h["rssi"] is not None else -999)) if located else None
+        spread = 0.0
+        cells = set()
+        if located:
+            lats = [h["lat"] for h in located]
+            lons = [h["lon"] for h in located]
+            spread = haversine_m(min(lats), min(lons), max(lats), max(lons))
+            cells = {(round(h["lat"] / 0.002), round(h["lon"] / 0.004)) for h in located}
+        flags = sorted({f for h in hs for f in (h["flags"] or "").split() if f})
+        vendor = next((h["vendor"] for h in hs if h["vendor"]), "")
+        raw = next((h["raw"] for h in reversed(hs) if h["raw"]), "")
+        mfg = next((h["mfg"] for h in hs if h["mfg"]), "")
+        channels = sorted({h["channel"] for h in hs if h["channel"]})
+        freq = next((h["freq"] for h in hs if h["freq"]), 0)
+        uuids = next((h["uuids"] for h in hs if h["uuids"]), "")
+        hv = identify(kind, name, mfg, raw, uuids)
+        if hv and cat == "Unidentified" and hv["layer"]:
+            cls, cat = "HARAVA", hv["layer"]          # Harava's own database identified it
+        tmode = tracker_mode(raw, fleet_s) if cat == "Tracker" else ""
+        sensor = ruuvi_decode(raw) if ("Ruuvi" in fleet_s or mfg == "499") and raw else None
+        out.append({
+            "kind": kind, "mac": mac, "name": name, "vendor": vendor,
+            "fleets": fleet_s, "class": cls, "category": cat,
+            "hears": max(len(log_hs), sit_hits), "log_rows": len(log_hs),
+            "in_sit": bool(sit_hs), "sit_hits": sit_hits, "sit_rssi_min": sit_min,
+            "vr": bool(cat == "Glasses & VR" and VR_NAME.search(name or "")),
+            "first": min(h["ts"] for h in hs), "last": max(h["last_ts"] or h["ts"] for h in hs),
+            "rssi_max": max(rssis) if rssis else None,
+            "rssi_med": round(statistics.median(log_rssis)) if log_rssis else None,
+            "channel": ",".join(map(str, channels)), "freq": freq, "band": freq_band(freq, kind),
+            "flags": " ".join(flags), "mfg": mfg,
+            "uuids": uuids,
+            "ident": hv["name"] if hv else "", "ident_id": hv["id"] if hv else "",
+            "ident_conf": hv["confidence"] if hv else "", "ident_note": hv["note"] if hv else "",
+            "company": hv["company"] if hv else "", "group": hv["group"] if hv else "",
+            "vendor_ie": next((h["vendor_ie"] for h in hs if h["vendor_ie"]), ""),
+            "raw": raw,
+            "lat": loud["lat"] if loud else None, "lon": loud["lon"] if loud else None,
+            "spread_m": round(spread), "places": len(cells),
+            "travelled": bool(spread >= CFG["travel_min_m"] and len(cells) >= 2),
+            "tracker_mode": tmode, "sensor": sensor,
+        })
+    # addresses that share a fingerprint: how many, and a name if any of them told it
+    by_group = defaultdict(list)
+    for d in out:
+        if d["group"]:
+            by_group[d["group"]].append(d)
+    for g, ds in by_group.items():
+        names = Counter(x["name"] for x in ds if x["name"])
+        if g.startswith("uuid128:"):
+            # a shared custom service UUID alone is not proof: many devices of one maker use the same one
+            # (Ruuvi tags, Windows PCs, Galaxy Buds). Only addresses that also tell the same name are joined.
+            named = [x for x in ds if x["name"]] if len(names) == 1 else []
+            for x in ds:
+                if x not in named:
+                    x["group"] = ""
+            ds = named
+            if len(ds) < 2:
+                for x in ds:
+                    x["group"] = ""
+                continue
+        gname = names.most_common(1)[0][0] if names else ""
+        for x in ds:
+            x["group_size"] = len(ds)
+            x["group_name"] = gname
+    for d in out:
+        d.setdefault("group_size", 1)
+        d.setdefault("group_name", "")
+        # a nameless address of a named group: identify it again with the group's name
+        # (the Mesh beacons of a "Charge" device carry no name, its other adverts do)
+        if not d["name"] and d["group_name"] and d["group_size"] > 1 and d["kind"] == "BLE":
+            hv = identify(d["kind"], d["group_name"], d["mfg"], d["raw"], d["uuids"])
+            if hv and hv["id"] != d["ident_id"] and hv["id"] in NAME_RULE_IDS:
+                d.update({"ident": hv["name"], "ident_id": hv["id"], "ident_conf": hv["confidence"],
+                          "ident_note": hv["note"]})
+                if d["class"] == "HARAVA" and hv["layer"]:
+                    d["category"] = hv["layer"]
+    out.sort(key=lambda d: (-(d["rssi_max"] if d["rssi_max"] is not None else -999)))
+    return out
+
+
+def build_path(hears, max_pts=6000):
+    pts = []
+    for h in hears:
+        if h["lat"] is None or h["lon"] is None or not h["ts"]:
+            continue
+        if pts:
+            lt, la, lo = pts[-1]
+            if la == h["lat"] and lo == h["lon"]:
+                continue
+            if haversine_m(la, lo, h["lat"], h["lon"]) < 8 and h["ts"] - lt < 300000:
+                continue
+        pts.append((h["ts"], h["lat"], h["lon"]))
+    if len(pts) > max_pts:
+        step = len(pts) / max_pts
+        pts = [pts[int(i * step)] for i in range(max_pts)]
+    # split where the phone jumped (no fix for a while)
+    parts, cur = [], []
+    for p in pts:
+        if cur and (p[0] - cur[-1][0] > 30 * 60000):
+            parts.append(cur)
+            cur = []
+        cur.append(p)
+    if cur:
+        parts.append(cur)
+    return [[[la, lo, t] for t, la, lo in part] for part in parts if len(part) > 1]
+
+
+def range_args():
+    return to_int(request.args.get("from")), to_int(request.args.get("to"))
+
+
+# ─────────────────────────── web app ───────────────────────────
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
+
+
+# ───────────────────────── users and sign-in ─────────────────────────
+# Users live in their own SQLite file (harava_users.db, not in git), apart from the radio data, so
+# clearing harava.db never removes a sign-in. Without any user Harava is open, as on a desktop.
+# Permissions: admin (everything + /maintenance), analyze (also changes data: imports, My devices,
+# identification reload), view (looks only). The session cookie is signed with a random key kept in
+# .harava_secret (not in git).
+USERS_DB = os.path.join(HERE, "harava_users.db")
+SECRET_FILE = os.path.join(HERE, ".harava_secret")
+ROLES = {"view": "View only", "analyze": "Analyze", "admin": "Admin"}
+ROLE_RANK = {"view": 1, "analyze": 2, "admin": 3}
+OPEN_ENDPOINTS = {"login", "logout", "static", "healthz"}
+PW_MIN = 12
+_fails = defaultdict(list)                                   # ip -> times of failed sign-ins
+_fails_lock = threading.Lock()
+FAIL_WINDOW, FAIL_MAX_IP, FAIL_MAX_ALL = 15 * 60, 5, 30
+
+
+def needs(role):
+    """Decorator: the least permission a route needs (view < analyze < admin)."""
+    def deco(fn):
+        fn.harava_role = role
+        return fn
+    return deco
+
+
+def _write_private(path, text):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def secret_key():
+    try:
+        with open(SECRET_FILE, encoding="utf-8") as fh:
+            k = fh.read().strip()
+        if len(k) >= 32:
+            return k
+    except OSError:
+        pass
+    k = secrets.token_hex(32)
+    _write_private(SECRET_FILE, k)
+    return k
+
+
+def udb():
+    con = sqlite3.connect(USERS_DB, timeout=10)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def init_users_db():
+    new = not os.path.exists(USERS_DB)
+    with udb() as con:
+        con.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id            INTEGER PRIMARY KEY,
+            username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            first_name    TEXT NOT NULL DEFAULT '',
+            last_name     TEXT NOT NULL DEFAULT '',
+            role          TEXT NOT NULL DEFAULT 'view' CHECK (role IN ('view', 'analyze', 'admin')),
+            password_hash TEXT NOT NULL,
+            active        INTEGER NOT NULL DEFAULT 1,
+            must_change   INTEGER NOT NULL DEFAULT 0,
+            created       TEXT NOT NULL,
+            updated       TEXT NOT NULL,
+            last_login    TEXT
+        );
+        CREATE TABLE IF NOT EXISTS auth_log (
+            id       INTEGER PRIMARY KEY,
+            ts       TEXT NOT NULL,
+            username TEXT,
+            ip       TEXT,
+            event    TEXT NOT NULL
+        );
+        """)
+    if new:
+        try:
+            os.chmod(USERS_DB, 0o600)
+        except OSError:
+            pass
+
+
+def _now():
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def users_exist():
+    with udb() as con:
+        return con.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+
+
+def auth_log(event, username="", ip=""):
+    with udb() as con:
+        con.execute("INSERT INTO auth_log (ts, username, ip, event) VALUES (?,?,?,?)", (_now(), username, ip, event))
+        con.execute("DELETE FROM auth_log WHERE id NOT IN (SELECT id FROM auth_log ORDER BY id DESC LIMIT 2000)")
+
+
+def _pw_version(pw_hash):
+    """Changes when the password changes, so a new password signs out the old sessions."""
+    return hashlib.sha256(pw_hash.encode()).hexdigest()[:16]
+
+
+def _public_user(r):
+    return {"id": r["id"], "username": r["username"], "first_name": r["first_name"], "last_name": r["last_name"],
+            "role": r["role"], "role_name": ROLES[r["role"]], "active": bool(r["active"]),
+            "must_change": bool(r["must_change"]), "created": r["created"], "last_login": r["last_login"]}
+
+
+def current_user():
+    """The signed-in user (dict) for this request, or None. Without any users: the open desktop mode."""
+    if "harava_user" in g:
+        return g.harava_user
+    u = None
+    if not users_exist():
+        u = {"id": 0, "username": "", "first_name": "", "last_name": "", "role": "admin", "role_name": "Admin",
+             "open": True, "must_change": False}
+    elif session.get("uid"):
+        with udb() as con:
+            r = con.execute("SELECT * FROM users WHERE id = ?", (session["uid"],)).fetchone()
+        if r and r["active"] and session.get("pwv") == _pw_version(r["password_hash"]):
+            u = _public_user(r)
+    g.harava_user = u
+    return u
+
+
+init_users_db()
+app.secret_key = secret_key()
+app.config.update(SESSION_COOKIE_NAME="harava_session", SESSION_COOKIE_HTTPONLY=True,
+                  SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=CFG["behind_proxy"],
+                  PERMANENT_SESSION_LIFETIME=timedelta(days=CFG["session_days"]))
+
+
+def _same_origin():
+    """State-changing requests must come from Harava's own page (a second guard next to SameSite)."""
+    src = request.headers.get("Origin") or request.headers.get("Referer")
+    if not src:
+        return True
+    want = request.host_url.rstrip("/")
+    return src == want or src.startswith(want + "/")
+
+
+@app.before_request
+def guard():
+    if request.method in ("POST", "PUT", "DELETE", "PATCH") and not _same_origin():
+        return jsonify({"error": "request from another site refused"}), 403
+    if request.endpoint in OPEN_ENDPOINTS:
+        return None
+    api = request.path.startswith(("/api/", "/doc/"))
+    u = current_user()
+    if u is None:
+        if api:
+            return jsonify({"error": "sign in first", "login": "/login"}), 401
+        nxt = request.full_path.rstrip("?") if request.path != "/" else ""
+        return redirect("/login" + (f"?next={nxt}" if nxt else ""))
+    if u.get("must_change") and request.endpoint not in ("account", "api_account_password"):
+        return (jsonify({"error": "change your password first", "account": "/account"}), 403) if api else redirect("/account")
+    view = app.view_functions.get(request.endpoint)
+    need = getattr(view, "harava_role", "view")
+    if ROLE_RANK[u["role"]] < ROLE_RANK[need]:
+        msg = f"needs the {ROLES[need]} permission (you have {u['role_name']})"
+        return (jsonify({"error": msg}), 403) if api else (Response(msg, 403, mimetype="text/plain"))
+    return None
+
+
+@app.after_request
+def security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    if request.endpoint != "static":
+        resp.headers.setdefault("Cache-Control", "no-store")
+    return resp
+
+
+def _too_many(ip, now):
+    with _fails_lock:
+        for k in list(_fails):
+            _fails[k] = [t for t in _fails[k] if now - t < FAIL_WINDOW]
+            if not _fails[k]:
+                del _fails[k]
+        mine = _fails.get(ip, [])
+        total = sum(len(v) for v in _fails.values())
+        if len(mine) >= FAIL_MAX_IP:
+            return int(FAIL_WINDOW - (now - mine[0])) // 60 + 1
+        if total >= FAIL_MAX_ALL:
+            return 15
+    return 0
+
+
+_DUMMY_HASH = generate_password_hash(secrets.token_hex(16))   # same work for unknown usernames
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not users_exist():
+        return redirect("/")
+    nxt = request.values.get("next", "")
+    if not nxt.startswith("/") or nxt.startswith("//") or "\\" in nxt:
+        nxt = "/"
+    error = ""
+    if request.method == "POST":
+        ip, now = request.remote_addr or "?", time.time()
+        wait = _too_many(ip, now)
+        if wait:
+            error = f"Too many failed sign-ins. Try again in {wait} min."
+        else:
+            name = request.form.get("username", "").strip()
+            pw = request.form.get("password", "")
+            with udb() as con:
+                r = con.execute("SELECT * FROM users WHERE username = ?", (name,)).fetchone()
+            ok = check_password_hash(r["password_hash"] if r else _DUMMY_HASH, pw) and bool(r) and bool(r["active"])
+            if ok:
+                with _fails_lock:
+                    _fails.pop(ip, None)
+                session.clear()
+                session["uid"], session["pwv"] = r["id"], _pw_version(r["password_hash"])
+                session.permanent = bool(request.form.get("remember"))
+                with udb() as con:
+                    con.execute("UPDATE users SET last_login = ? WHERE id = ?", (_now(), r["id"]))
+                auth_log("sign-in", r["username"], ip)
+                print(f"  sign-in ok   : {r['username']} from {ip}")
+                return redirect("/account" if r["must_change"] else nxt)
+            with _fails_lock:
+                _fails[ip].append(now)
+            auth_log("failed sign-in" + ("" if r is None or r["active"] else " (disabled user)"), name[:64], ip)
+            print(f"  sign-in FAIL : {name[:64]!r} from {ip}")
+            time.sleep(1.0)
+            error = "Wrong username or password."
+    return render_template("login.html", app_name=APP_NAME, version=APP_VERSION, error=error, next=nxt), \
+        (429 if error.startswith("Too many") else 200)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    u = current_user() if users_exist() else None
+    if u and not u.get("open"):
+        auth_log("sign-out", u["username"], request.remote_addr or "")
+    session.clear()
+    return redirect("/login")
+
+
+@app.route("/healthz")
+def healthz():
+    """For update.sh and monitoring: answers without a sign-in and tells nothing else."""
+    return Response("ok\n", mimetype="text/plain")
+
+
+def _check_password(pw):
+    if len(pw or "") < PW_MIN:
+        return f"the password must have at least {PW_MIN} characters"
+    if len(pw) > 200:
+        return "the password is too long"
+    return ""
+
+
+def _temp_password():
+    return secrets.token_urlsafe(12)
+
+
+@app.route("/account")
+def account():
+    u = current_user()
+    return render_template("account.html", app_name=APP_NAME, version=APP_VERSION, user=u)
+
+
+@app.route("/api/account/password", methods=["POST"])
+def api_account_password():
+    u = current_user()
+    if u.get("open"):
+        return jsonify({"error": "no users yet: Harava is open on this computer"}), 400
+    body = request.get_json(silent=True) or {}
+    with udb() as con:
+        r = con.execute("SELECT * FROM users WHERE id = ?", (u["id"],)).fetchone()
+        if not check_password_hash(r["password_hash"], body.get("current", "")):
+            return jsonify({"error": "the current password is wrong"}), 400
+        err = _check_password(body.get("new", ""))
+        if err:
+            return jsonify({"error": err}), 400
+        if body["new"] == body.get("current"):
+            return jsonify({"error": "choose a new password, not the current one"}), 400
+        h = generate_password_hash(body["new"])
+        con.execute("UPDATE users SET password_hash = ?, must_change = 0, updated = ? WHERE id = ?", (h, _now(), u["id"]))
+    session["pwv"] = _pw_version(h)                  # this session stays, the others are signed out
+    auth_log("password changed", u["username"], request.remote_addr or "")
+    return jsonify({"ok": True})
+
+
+# ── maintenance (admin) ──
+@app.route("/maintenance")
+@needs("admin")
+def maintenance():
+    return render_template("maintenance.html", app_name=APP_NAME, version=APP_VERSION, user=current_user(),
+                           roles=ROLES, pw_min=PW_MIN)
+
+
+def _active_admins(con, exclude_id=None):
+    q = "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1"
+    if exclude_id is not None:
+        return con.execute(q + " AND id != ?", (exclude_id,)).fetchone()[0]
+    return con.execute(q).fetchone()[0]
+
+
+@app.route("/api/users")
+@needs("admin")
+def api_users():
+    with udb() as con:
+        users = [_public_user(r) for r in con.execute("SELECT * FROM users ORDER BY username COLLATE NOCASE")]
+        log = [dict(r) for r in con.execute("SELECT ts, username, ip, event FROM auth_log ORDER BY id DESC LIMIT 60")]
+    return jsonify({"users": users, "log": log, "roles": ROLES, "me": current_user()["id"]})
+
+
+def _user_fields(body):
+    out = {}
+    for k in ("first_name", "last_name"):
+        if k in body:
+            v = str(body[k]).strip()
+            if len(v) > 80:
+                raise ValueError(f"{k.replace('_', ' ')} is too long")
+            out[k] = v
+    if "role" in body:
+        if body["role"] not in ROLES:
+            raise ValueError("unknown permission")
+        out["role"] = body["role"]
+    if "active" in body:
+        out["active"] = 1 if body["active"] else 0
+    return out
+
+
+@app.route("/api/users", methods=["POST"])
+@needs("admin")
+def api_users_add():
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("username", "")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9._@-]{3,64}", name):
+        return jsonify({"error": "the username must be 3-64 letters, digits or . _ @ -"}), 400
+    try:
+        f = _user_fields(body)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if not users_exist():
+        f["role"] = "admin"                          # the first user is always an admin
+    pw = body.get("password") or ""
+    temp = not pw
+    if temp:
+        pw = _temp_password()
+    elif _check_password(pw):
+        return jsonify({"error": _check_password(pw)}), 400
+    with udb() as con:
+        if con.execute("SELECT 1 FROM users WHERE username = ?", (name,)).fetchone():
+            return jsonify({"error": f"the username {name} is taken"}), 400
+        con.execute("""INSERT INTO users (username, first_name, last_name, role, password_hash, active, must_change,
+                       created, updated) VALUES (?,?,?,?,?,1,1,?,?)""",
+                    (name, f.get("first_name", ""), f.get("last_name", ""), f.get("role", "view"),
+                     generate_password_hash(pw), _now(), _now()))
+    auth_log(f"added user {name} ({ROLES[f.get('role', 'view')]})", current_user()["username"], request.remote_addr or "")
+    return jsonify({"ok": True, "temp_password": pw if temp else ""})
+
+
+@app.route("/api/users/<int:uid>", methods=["PUT"])
+@needs("admin")
+def api_users_edit(uid):
+    body = request.get_json(silent=True) or {}
+    try:
+        f = _user_fields(body)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    me = current_user()
+    with udb() as con:
+        r = con.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
+        if not r:
+            return jsonify({"error": "no such user"}), 404
+        losing_admin = r["role"] == "admin" and r["active"] and (f.get("role", "admin") != "admin" or f.get("active", 1) == 0)
+        if losing_admin and _active_admins(con, exclude_id=uid) == 0:
+            return jsonify({"error": "Harava needs at least one active admin"}), 400
+        if uid == me["id"] and f.get("active", 1) == 0:
+            return jsonify({"error": "you cannot disable yourself"}), 400
+        if f:
+            sets = ", ".join(f"{k} = ?" for k in f)
+            con.execute(f"UPDATE users SET {sets}, updated = ? WHERE id = ?", (*f.values(), _now(), uid))
+    auth_log(f"changed user {r['username']}" + (f" ({ROLES[f['role']]})" if "role" in f else "") + ("" if "active" not in f else (" (active)" if f["active"] else " (disabled)")), me["username"], request.remote_addr or "")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/<int:uid>/password", methods=["POST"])
+@needs("admin")
+def api_users_reset(uid):
+    pw = _temp_password()
+    with udb() as con:
+        r = con.execute("SELECT username FROM users WHERE id = ?", (uid,)).fetchone()
+        if not r:
+            return jsonify({"error": "no such user"}), 404
+        con.execute("UPDATE users SET password_hash = ?, must_change = 1, updated = ? WHERE id = ?",
+                    (generate_password_hash(pw), _now(), uid))
+    auth_log(f"new one-time password for {r['username']}", current_user()["username"], request.remote_addr or "")
+    return jsonify({"ok": True, "temp_password": pw})
+
+
+@app.route("/api/users/<int:uid>", methods=["DELETE"])
+@needs("admin")
+def api_users_delete(uid):
+    me = current_user()
+    if uid == me["id"]:
+        return jsonify({"error": "you cannot remove yourself"}), 400
+    with udb() as con:
+        r = con.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
+        if not r:
+            return jsonify({"error": "no such user"}), 404
+        if r["role"] == "admin" and r["active"] and _active_admins(con, exclude_id=uid) == 0:
+            return jsonify({"error": "Harava needs at least one active admin"}), 400
+        con.execute("DELETE FROM users WHERE id = ?", (uid,))
+    auth_log(f"removed user {r['username']}", me["username"], request.remote_addr or "")
+    return jsonify({"ok": True})
+
+
+def admin_cli():
+    """python harava.py --add-admin : create an admin, or set a new password for an existing user
+    (who then becomes an admin). For the first user on a server, and for a forgotten password."""
+    init_users_db()
+    print(f"{APP_NAME}: add an admin or reset a password (users are stored in {USERS_DB})")
+    name = input("Username: ").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._@-]{3,64}", name or ""):
+        sys.exit("The username must be 3-64 letters, digits or . _ @ -")
+    with udb() as con:
+        r = con.execute("SELECT * FROM users WHERE username = ?", (name,)).fetchone()
+    first = input("First name: ").strip() if not r else (input(f"First name [{r['first_name']}]: ").strip() or r["first_name"])
+    last = input("Last name: ").strip() if not r else (input(f"Last name [{r['last_name']}]: ").strip() or r["last_name"])
+    while True:
+        pw = getpass.getpass(f"Password (at least {PW_MIN} characters): ")
+        err = _check_password(pw)
+        if err:
+            print("  " + err)
+            continue
+        if getpass.getpass("Repeat the password: ") != pw:
+            print("  the passwords differ, try again")
+            continue
+        break
+    with udb() as con:
+        if r:
+            con.execute("""UPDATE users SET first_name = ?, last_name = ?, role = 'admin', active = 1, must_change = 0,
+                           password_hash = ?, updated = ? WHERE id = ?""",
+                        (first, last, generate_password_hash(pw), _now(), r["id"]))
+        else:
+            con.execute("""INSERT INTO users (username, first_name, last_name, role, password_hash, active, must_change,
+                           created, updated) VALUES (?,?,?,'admin',?,1,0,?,?)""",
+                        (name, first, last, generate_password_hash(pw), _now(), _now()))
+    auth_log("admin set from the command line", name, "console")
+    print(f"Saved: {name} is an admin. Other users are added on the /maintenance page.")
+
+
+@app.route("/")
+def index():
+    return render_template("index.html", version=APP_VERSION, app_name=APP_NAME,
+                           watch_folder=CFG["watch_folder"], travel_min_m=int(CFG["travel_min_m"]),
+                           carto_api_key=CARTO_API_KEY, user=current_user())
+
+
+@app.route("/api/summary")
+def api_summary():
+    with db() as con:
+        ids = active_import_ids(con)
+        imports = con.execute("SELECT COUNT(*) FROM imports").fetchone()[0]
+        if not ids:
+            return jsonify({"imports": imports, "days": [], "first": None, "last": None})
+        q = ",".join("?" * len(ids))
+        rows = con.execute(f"SELECT ts FROM hears WHERE import_id IN ({q}) AND ts IS NOT NULL", ids).fetchall()
+    days = Counter(datetime.fromtimestamp(r[0] / 1000).strftime("%Y-%m-%d") for r in rows)
+    first = min((r[0] for r in rows), default=None)
+    last = max((r[0] for r in rows), default=None)
+    return jsonify({"imports": imports, "days": [{"day": d, "hears": n} for d, n in sorted(days.items())],
+                    "first": first, "last": last})
+
+
+@app.route("/api/devices")
+def api_devices():
+    t_from, t_to = range_args()
+    no_sit = request.args.get("nosit") == "1"     # the phone check works from the log only
+    with db() as con:
+        hears = query_hears(con, t_from, t_to, no_sit=no_sit)
+    return jsonify({"devices": build_devices(hears), "hears": len(hears)})
+
+
+@app.route("/api/path")
+def api_path():
+    t_from, t_to = range_args()
+    with db() as con:
+        hears = query_hears(con, t_from, t_to, no_sit=True)   # Sit rows carry one hear-point, not a track
+        parts = build_path(hears)
+        # KML LineStrings carry no times; show them when their import overlaps the range
+        ids = active_import_ids(con)
+        kml_parts = []
+        if ids:
+            q = ",".join("?" * len(ids))
+            imps = con.execute(f"SELECT id, first_ts, last_ts FROM imports WHERE id IN ({q}) AND path_pts>0", ids)
+            for imp in imps.fetchall():
+                if t_from and imp["last_ts"] and imp["last_ts"] < t_from:
+                    continue
+                if t_to and imp["first_ts"] and imp["first_ts"] >= t_to:
+                    continue
+                rows = con.execute("SELECT part, lat, lon FROM paths WHERE import_id=? ORDER BY part, seq",
+                                   (imp["id"],)).fetchall()
+                byp = defaultdict(list)
+                for r in rows:
+                    byp[r["part"]].append([r["lat"], r["lon"], None])
+                kml_parts.extend(byp.values())
+    if not parts:
+        parts = kml_parts
+    return jsonify({"parts": parts})
+
+
+@app.route("/api/timeline")
+def api_timeline():
+    t_from, t_to = range_args()
+    cat = request.args.get("cat") or ""
+    with db() as con:
+        hears = query_hears(con, t_from, t_to)
+    all_lo = hears[0]["ts"] if hears else None
+    all_hi = hears[-1]["ts"] + 1 if hears else None
+    if cat:
+        # only radios of one layer, e.g. "Glasses & VR"
+        keys = {(d["kind"], d["mac"]) for d in build_devices(hears) if d["category"] == cat}
+        hears = [h for h in hears if (h["kind"], h["mac"]) in keys]
+    # Bars come from the log (hear by hear). A Sit export has only first..last per radio, so its
+    # radios count once, when first heard: they fill the bars only for radios the log does not have.
+    logged = {(h["kind"], h["mac"]) for h in hears if h["src"] != "sit"}
+    sit_only = sum(1 for h in hears if h["src"] == "sit" and (h["kind"], h["mac"]) not in logged)
+    hears = [h for h in hears if h["src"] != "sit" or (h["kind"], h["mac"]) not in logged]
+    lo = t_from or all_lo
+    hi = t_to or all_hi
+    if lo is None or hi is None:
+        return jsonify({"bin_ms": 0, "bins": [], "cat": cat, "hears": 0})
+    span = hi - lo
+    bin_ms = 600000 if span <= 2 * 86400000 else (3600000 if span <= 14 * 86400000 else 86400000)
+    start = lo - lo % bin_ms
+    bins = defaultdict(lambda: {"WIFI": 0, "BLE": 0, "new": 0})
+    seen = set()
+    for h in hears:
+        t0 = max(h["ts"], start)          # a Sit row may start before the range
+        b = t0 - (t0 - start) % bin_ms
+        bins[b][h["kind"] if h["kind"] in ("WIFI", "BLE") else "BLE"] += 1
+        k = (h["kind"], h["mac"])
+        if k not in seen:
+            seen.add(k)
+            bins[b]["new"] += 1
+    out = []
+    t = start
+    while t < hi:
+        v = bins.get(t, {"WIFI": 0, "BLE": 0, "new": 0})
+        out.append({"t": t, **v})
+        t += bin_ms
+    return jsonify({"bin_ms": bin_ms, "bins": out, "cat": cat, "hears": len(hears), "sit_only": sit_only})
+
+
+@app.route("/api/device")
+def api_device():
+    t_from, t_to = range_args()
+    kind = (request.args.get("kind") or "").upper()
+    mac = (request.args.get("mac") or "").upper()
+    with db() as con:
+        hears = query_hears(con, t_from, t_to, kind, mac)
+        all_hears = query_hears(con, None, None, kind, mac)
+    dev = build_devices(hears)
+    return jsonify({
+        "device": dev[0] if dev else None,
+        "hears": [{"ts": h["ts"], "rssi": h["rssi"], "lat": h["lat"], "lon": h["lon"], "name": h["name"],
+                   "channel": h["channel"], "src": h["src"], "last_ts": h["last_ts"], "hits": h["hits"]}
+                  for h in hears],
+        "days_seen": sorted({datetime.fromtimestamp(h["ts"] / 1000).strftime("%Y-%m-%d") for h in all_hears if h["ts"]}),
+    })
+
+
+@app.route("/api/export.csv")
+def api_export():
+    t_from, t_to = range_args()
+    macs = set(filter(None, (request.args.get("keys") or "").split(",")))
+    with db() as con:
+        devs = build_devices(query_hears(con, t_from, t_to))
+    if macs:
+        devs = [d for d in devs if f"{d['kind']}|{d['mac']}" in macs]
+    cols = ["kind", "mac", "name", "vendor", "category", "class", "fleets", "hears", "log_rows", "sit_hits", "first", "last",
+            "rssi_max", "rssi_med", "channel", "freq", "band", "flags", "spread_m", "places", "travelled",
+            "tracker_mode", "lat", "lon", "mfg", "uuids", "raw"]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(cols)
+    for d in devs:
+        row = []
+        for c in cols:
+            v = d.get(c)
+            if c in ("first", "last") and v:
+                v = datetime.fromtimestamp(v / 1000).strftime("%Y-%m-%d %H:%M:%S")
+            row.append("" if v is None else v)
+        w.writerow(row)
+    name = "devices-export-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
+    return Response(buf.getvalue().encode("utf-8-sig"), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={name}"})
+
+
+@app.route("/api/imports")
+def api_imports():
+    with db() as con:
+        rows = [dict(r) for r in con.execute("SELECT * FROM imports ORDER BY id DESC")]
+    return jsonify({"imports": rows, "watch_folder": CFG["watch_folder"]})
+
+
+@app.route("/api/import", methods=["POST"])
+@needs("analyze")
+def api_import():
+    results = []
+    for f in request.files.getlist("files"):
+        results.append(import_bytes(f.filename, f.read()))
+    return jsonify({"results": results})
+
+
+@app.route("/api/scan", methods=["POST"])
+@needs("analyze")
+def api_scan():
+    if not os.path.isdir(CFG["watch_folder"]):
+        return jsonify({"results": [], "error": f"folder not found: {CFG['watch_folder']}"}), 400
+    return jsonify({"results": scan_folder(CFG["watch_folder"])})
+
+
+@app.route("/api/imports/<int:iid>/toggle", methods=["POST"])
+@needs("analyze")
+def api_toggle(iid):
+    with _db_lock, db() as con:
+        con.execute("UPDATE imports SET active = 1 - active WHERE id=?", (iid,))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/imports/<int:iid>", methods=["DELETE"])
+@needs("analyze")
+def api_delete(iid):
+    with _db_lock, db() as con:
+        con.execute("DELETE FROM hears WHERE import_id=?", (iid,))
+        con.execute("DELETE FROM paths WHERE import_id=?", (iid,))
+        con.execute("DELETE FROM imports WHERE id=?", (iid,))
+    return jsonify({"ok": True})
+
+
+# ─────────────── identification database ───────────────
+
+def _pattern(d):
+    """A short description of what a still-unidentified radio advertises, to find the next rule to write."""
+    if d["kind"] != "BLE":
+        return "Wi-Fi"
+    f = adv_features(d["mfg"], d["raw"], d["uuids"])
+    if f["mfg"]:
+        comp = BT["companies"].get(f["mfg"], "unknown company")
+        return f"manufacturer data {f['mfg']} ({comp}), starts {f['mfg_data'][:1].hex().upper() or '—'}"
+    short = {"02": "16-bit services", "03": "16-bit services", "06": "128-bit services", "07": "128-bit services",
+             "08": "short name", "09": "name", "0A": "Tx power", "16": "Service Data", "21": "128-bit service data",
+             "2B": "Mesh beacon", "FF": "manufacturer data"}
+    parts = []
+    for t, data in f["ads"]:
+        if t == "01":
+            continue
+        nm = short.get(t) or BT["ad_types"].get(t, f"AD {t}")
+        if t == "16" and len(data) >= 2:
+            u = format(int.from_bytes(data[:2], "little"), "04X")
+            nm += f" {u}" + (f" ({BT['uuids'][u]['name']})" if u in BT["uuids"] else "")
+        parts.append(nm)
+    if f["svc"] and not any(p.startswith("Service Data") for p in parts):
+        parts.append("services " + ", ".join(sorted(f["svc"])[:3]))
+    custom = next((u for u in f["uuid128"] if not u.endswith("-0000-1000-8000-00805F9B34FB")), "")
+    if custom:
+        parts.append(f"custom service {custom[:8]}…")
+    if d["name"]:
+        parts.append("named")
+    if d.get("group_name") and d["group_name"] != d["name"]:
+        parts.append(f"same device as '{d['group_name']}'")
+    return " + ".join(dict.fromkeys(parts)) or ("flags only" if f["ads"] else "no data")
+
+
+@app.route("/api/ids")
+def api_ids():
+    t_from, t_to = range_args()
+    with db() as con:
+        devs = build_devices(query_hears(con, t_from, t_to))
+    ble = [d for d in devs if d["kind"] == "BLE"]
+    fw_left = [d for d in ble if d["class"] in ("", "HARAVA")]          # Fieldwatch did not identify these
+    still = [d for d in ble if d["category"] == "Unidentified"]
+    hits = Counter(d["ident_id"] for d in devs if d["ident_id"])
+    groups = defaultdict(set)
+    for d in devs:
+        if d["group"]:
+            groups[d["ident_id"]].add(d["group"])
+    rules = [{"id": r["id"], "name": r["name"], "layer": r.get("layer", ""), "confidence": r.get("confidence", ""),
+              "note": r.get("note", ""), "match": {k: v for k, v in r.get("match", {}).items()},
+              "hits": hits.get(r["id"], 0), "devices": len(groups.get(r["id"], ())) or None}
+             for r in HV_RULES]
+    pats = defaultdict(list)
+    for d in still:
+        pats[_pattern(d)].append(d)
+    patterns = sorted(({"pattern": k, "count": len(v), "example": v[0]["mac"],
+                        "example_raw": v[0]["raw"][:60], "rssi_max": max((x["rssi_max"] or -999) for x in v)}
+                       for k, v in pats.items()), key=lambda x: -x["count"])[:30]
+    return jsonify({
+        "bt": {"source": BT.get("source", ""), "fetched": BT.get("fetched", ""),
+               "companies": len(BT["companies"]), "uuids": len(BT["uuids"]), "ad_types": len(BT["ad_types"])},
+        "db": {"name": HV.get("name", ""), "version": HV.get("version", ""), "rules": len(HV_RULES)},
+        "counts": {"ble": len(ble), "fieldwatch_left": len(fw_left), "harava_identified": len(fw_left) - len(still),
+                   "still_unidentified": len(still), "company_only": hits.get("company", 0),
+                   "grouped_addresses": sum(1 for d in devs if d["group"] and d.get("group_size", 1) > 1),
+                   "grouped_devices": len({d["group"] for d in devs if d["group"] and d.get("group_size", 1) > 1})},
+        "rules": rules, "patterns": patterns,
+    })
+
+
+@app.route("/api/ids/reload", methods=["POST"])
+@needs("analyze")
+def api_ids_reload():
+    return jsonify({"status": load_ids(), "rules": len(HV_RULES)})
+
+
+# ─────────────── my devices ───────────────
+
+OWN_MATCHES = ("mac", "mac_prefix", "name", "name_contains")
+
+
+@app.route("/api/own")
+def api_own():
+    with db() as con:
+        rows = [dict(r) for r in con.execute("SELECT * FROM own_devices ORDER BY label COLLATE NOCASE")]
+    return jsonify({"own": rows})
+
+
+@app.route("/api/own", methods=["POST"])
+@needs("analyze")
+def api_own_add():
+    o = request.get_json(force=True, silent=True) or {}
+    match = o.get("match", "")
+    value = clean_text(o.get("value", "")).strip()
+    kind = (o.get("kind") or "").upper()
+    label = clean_text(o.get("label", "")).strip() or value
+    if match not in OWN_MATCHES or not value:
+        return jsonify({"error": "choose how to match and give a value"}), 400
+    if kind not in ("", "WIFI", "BLE"):
+        return jsonify({"error": "radio must be Any, WIFI or BLE"}), 400
+    if match.startswith("mac"):
+        value = value.upper().replace("-", ":")
+        if not re.fullmatch(r"[0-9A-F]{2}(:[0-9A-F]{2}){0,5}:?", value):
+            return jsonify({"error": "address must look like AA:BB:CC:DD:EE:FF (or its start)"}), 400
+        value = value.rstrip(":")
+        if match == "mac" and len(value) != 17:
+            return jsonify({"error": "a full address has 6 parts, AA:BB:CC:DD:EE:FF"}), 400
+    with _db_lock, db() as con:
+        dup = con.execute("SELECT id FROM own_devices WHERE kind=? AND match=? AND value=? COLLATE NOCASE",
+                          (kind, match, value)).fetchone()
+        if dup:
+            return jsonify({"error": "that rule already exists"}), 400
+        cur = con.execute("INSERT INTO own_devices(label, kind, match, value, created) VALUES (?,?,?,?,?)",
+                          (label, kind, match, value, datetime.now().isoformat(timespec="seconds")))
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+
+@app.route("/api/own/<int:oid>", methods=["DELETE"])
+@needs("analyze")
+def api_own_delete(oid):
+    with _db_lock, db() as con:
+        con.execute("DELETE FROM own_devices WHERE id=?", (oid,))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/whatsnew")
+def api_whatsnew():
+    entries = read_whats_new()
+    return jsonify({"version": entries[0]["version"] if entries else "", "entries": entries[:10]})
+
+
+@app.route("/api/guides")
+def api_guides():
+    return jsonify({"guides": list_guides()})
+
+
+@app.route("/doc/<name>")
+def serve_doc(name):
+    """One PDF from doc/ (plain *.pdf file names only)."""
+    if not _PDF_NAME.match(name or "") or ".." in name:
+        abort(404)
+    return send_from_directory(DOC_DIR, name, mimetype="application/pdf")
+
+
+def main():
+    if "--add-admin" in sys.argv or "--set-password" in sys.argv:
+        admin_cli()
+        return
+    print(f"{APP_NAME} {APP_VERSION} — rakes through what your phone heard")
+    if CFG["require_login"] and not users_exist():
+        sys.exit("ERROR: require_login = true but there are no users yet. Run:  python harava.py --add-admin")
+    move_old_database()
+    init_db()
+    os.makedirs(CFG["watch_folder"], exist_ok=True)
+    url = f"http://{CFG['host']}:{CFG['port']}/"
+    print(f"  database     : {CFG['db']}")
+    print(f"  scan folder  : {CFG['watch_folder']}")
+    with udb() as con:
+        n_users = con.execute("SELECT COUNT(*) FROM users WHERE active = 1").fetchone()[0]
+    print(f"  sign-in      : {f'on, {n_users} active user(s); admin page /maintenance' if users_exist() else 'off (no users; python harava.py --add-admin)'}")
+    if CFG["behind_proxy"]:
+        print("  proxy        : behind nginx (X-Forwarded-*, secure cookies)")
+    print(f"  open         : {url}   (Ctrl+C stops)")
+    if CFG["open_browser"] and "--no-browser" not in sys.argv:
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+    # Flask's own server, as in WSPR Logger; behind nginx it trusts nginx's X-Forwarded-* headers
+    # (one proxy) so sign-in logs and secure cookies see the real address and https.
+    if CFG["behind_proxy"]:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    app.run(host=CFG["host"], port=CFG["port"], debug=False, threaded=True, use_reloader=False)
+
+
+if __name__ == "__main__":
+    main()

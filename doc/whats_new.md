@@ -1,0 +1,45 @@
+# What's new in Harava
+
+Short notes for users, newest first. Each version is one day of development (v.DDMMYYYY).
+The full technical history is in CHANGELOG.md. The newest heading gives the version shown
+under the app name.
+
+## v.09112026 — Harava on the web with users and permissions, its own identification database, a name, user guides, device layers, my own devices and Sit exports
+
+- **Harava on the web** — Harava can now run on a server behind nginx with HTTPS, for example at *harava.oh2gax.org*, and you upload your Fieldwatch exports on the Imports page from anywhere. On your own computer it still opens without a sign-in, as before.
+- **Sign-in** — once a user exists, every page asks for a username and password. *Keep me signed in* remembers you on that device for 30 days; ⏻ in the menu signs you out. After five wrong passwords the address has to wait 15 minutes.
+- **Users and permissions** — every user has one permission: *View only* (look at the map, lists, Phone check and Identification, export CSV), *Analyze* (also upload and import exports, edit My devices and reload the identification database) or *Admin* (also manage users). Buttons you cannot use are not shown.
+- **Maintenance page** — admins find *⚙️ Maintenance* in the menu (`/maintenance`): every user with first and last name, permission, an *active* switch and the last sign-in; *Add user*, *New password* and *Remove*; and a log of sign-ins, failed sign-ins and changes. A new user gets a one-time password and chooses their own at the first sign-in.
+- **My account** — 👤 your name in the menu opens your account, where you change your password.
+- **Mask addresses** — a switch under *Map layers* hides the second half of every address, all Wi-Fi network names and other people's device names on the screen, for screenshots you share. The data is not changed.
+- **Admin and server guide** — *User guides* has a second guide: installing Harava on a server next to other sites, users and permissions, updating with `update.sh`, backups and troubleshooting.
+- **Updates on the server** — `bash update.sh` updates Harava from GitHub in the same safe way as WSPR Logger: a database copy first, a check of the new files, then a restart and a test; `--rollback` goes back.
+- **Harava identification database** — Harava now has its own database of Bluetooth patterns (`ids/harava_ids.json`). It names radios that Fieldwatch leaves *Unidentified*: Bluetooth Mesh lights and plugs, Apple AirPods, iPhones and Macs, Samsung Galaxy phones, Windows PCs, Philips Hue lamps, TVs, Oral-B toothbrushes and more. On 8 November it named 1,725 of the 1,782 Bluetooth radios that had no signature (97 %).
+- **Identified as and Company / vendor** — two new columns on the Devices page and two new rows in the Selected radio panel. *Identified as* tells what the radio most likely is; a grey name with **?** means a weaker guess. *Company* comes from the official Bluetooth SIG list.
+- **Group same device** — many devices change their Bluetooth address every few minutes. When the data shows that several addresses belong to one device, *Group same device* (on by default, in Filter) shows them as one row with an **N addr.** tag. Harava joins addresses only on proof: the same Bluetooth Mesh device number, or the same custom service *and* the same name. On 8 November 957 changing addresses folded into 23 devices.
+- **EV charging points** — Bluetooth Mesh devices named *Charge* that wait to be set up are now *EV charging point (DEFA?)*. On 8 November 22 of them were heard around home, most only on the way through the parking area. A nameless address of such a device takes the name from its other adverts.
+- **Identified as selector** — a new list under the search box shows only one kind of identified device, e.g. *Philips Hue lamp* or *Samsung TV*. It is grouped by device layer, and the numbers count what the other filters leave. Search also finds the *Identified as* and *Company* texts, e.g. `hue`.
+- **Identification page** — *🔎 Identification* in the menu shows how much of your data is identified, which rules matched, and the most common patterns that are still unknown. *Reload database* reads the rule files again after you edit them.
+- **Bluetooth SIG numbers** — the official lists of Bluetooth company and service numbers come with Harava (`ids/bt_assigned_numbers.json`, 4,065 companies). `python tools/update_bt_numbers.py` downloads the newest lists.
+- **Harava** — the analyzer has a name: *harava* is Finnish for *rake*, and it rakes through what your phone heard. Start it with `start_harava.bat`. Your data moves from `fieldwatch.db` to `harava.db` by itself the first time.
+- **One project folder** — Harava now lives in its own project folder, ready for git: put your Fieldwatch exports into `data\` (*Scan folder* reads it). `data\`, `tmp_files\`, the database and `api_keys.py` stay out of git.
+- **What's new, User guides and About** — *✨ What's new* under the name at the top left opens one window with three tabs. The badge shows the version and turns amber when there is something new to read.
+- **A user guide** — *User guides* has the Harava User Guide (PDF). It covers how to collect with Fieldwatch (log and Sit), how to import, every part of the map and the Devices list, the device layers, My devices and the Phone check, and what the data can and cannot tell.
+- **Sit exports** — Harava now reads Fieldwatch *Sit export* files (CSV, JSON lines and KML). A Sit keeps every radio it heard, while the log writes at most 16 rows per scan.
+- **Heard only in Sit** — radios that only the Sit has get a **sit only** tag, and the *Heard only in Sit* switch lists exactly what the log missed. A newer export of the same sit replaces the older one, and radios marked *Mine* in Fieldwatch become My devices.
+- **Device layers** — every kind of radio in the Fieldwatch catalog is its own map layer with a switch. Click a name to show only that layer; click it again to show all.
+- **Icon pins** — glasses, trackers, surveillance, police, drones and hacking tools get icon pins on the map. A tracker that is separated from its owner pulses red.
+- **Glasses & VR** — smart glasses and VR headsets share one layer, because Meta uses the same Bluetooth ID for both. A name like *Quest 3* adds a **VR?** tag.
+- **My devices** — mark your own router, PC, phone or sensors with **＋** (on a Devices row or in the map's detail panel). They are hidden from the list, the map and the Phone check while *Hide my devices* is on. Bluetooth devices change their address, so match them by name.
+- **Graph for one kind of device** — the *Show* selector in the "Hears per 10 min" graph shows, for example, only Glasses & VR.
+- **Map without watermark** — the CARTO key from `api_keys.py` (as in WSPR Logger) removes the "API key required" text from the map.
+
+## v.08112026 — The first version: import, map, devices and the classroom phone check
+
+- **Import** — drop Fieldwatch log CSV, JSON lines or KML files on the Imports page, or press *Scan folder*. A file already imported is skipped.
+- **KML that Google Earth refuses** — Fieldwatch's own KML files, which Google Earth refuses because of hidden Wi-Fi names, load fine. A KML of the same time as a log is switched off, so radios are not counted twice.
+- **Map** — the phone's path and one pin per radio, at the place where it was heard loudest. Bluetooth pins are filled and Wi-Fi pins are rings; a bigger pin is louder. Click a pin for its details, a signal chart and every place it was heard.
+- **Timeline** — the graph above the map shows the hears and the new radios every 10 minutes; click a bar to zoom in.
+- **Devices** — a sortable table of every radio with search, filters and CSV export. Tags show radios that **travelled** with you, trackers that are **separated** from their owner, and Ruuvi temperatures.
+- **Phone check** — a classroom check: are all the phones in the box next to the teacher's phone? It counts phones in the box, in the room and outside, and *Auto-calibrate* sets the limit.
+- **Everything stays here** — the data stays in a database on this computer. Leaflet and Chart.js come with the app, so only the map background needs the internet.

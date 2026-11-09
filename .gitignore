@@ -1,0 +1,32 @@
+# local secrets and settings
+api_keys.py
+config.ini
+config.ini.bak
+harava_login.json
+.harava_secret
+
+# your Fieldwatch exports and other local files (real MAC addresses and locations: never commit)
+data/
+tmp_files/
+
+# local databases: radio data and users (password hashes) — never commit
+harava.db
+harava.db-*
+harava_users.db
+harava_users.db-*
+*.db.bak
+fieldwatch.db
+fieldwatch.db-*
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# LaTeX build files of the guides
+doc/src/out/
+doc/src/*.aux
+doc/src/*.log
+doc/src/*.out
+doc/src/*.toc

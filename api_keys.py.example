@@ -1,0 +1,14 @@
+"""
+api_keys.py.example — Template for local API key storage.
+
+  1. Copy this file to api_keys.py in the same folder.
+  2. Fill in your key below.
+  3. api_keys.py is listed in .gitignore. Never commit or share it.
+
+If api_keys.py is missing, harava.py still starts; it just
+prints a warning and the map shows the CARTO watermark.
+"""
+
+# CARTO Basemaps API key — https://carto.com/basemaps/apikey/
+# Removes the "API key required" watermark on the dark/light map tiles.
+CARTO_API_KEY = ""

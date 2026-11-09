@@ -1,0 +1,14 @@
+[
+  {
+    "file": "Harava_User_Guide.pdf",
+    "title": "Harava – User guide",
+    "description": "How to collect with Fieldwatch so that nothing is missed (log and Sit), signing in and the three permissions, importing, and how to read the map, the timeline, the selected-radio panel, the device layers (Glasses & VR, Trackers, Vehicles …), the filters, the Devices page, Harava's own identification and My devices; the classroom Phone check step by step; Mask addresses for screenshots; what the data can and cannot tell, questions you can answer, limitations and a quick reference.",
+    "date": "2026-11-09"
+  },
+  {
+    "file": "Harava_Admin_Guide.pdf",
+    "title": "Harava – Admin and server guide",
+    "description": "Running Harava on a server next to other sites: installing it step by step on Ubuntu with a systemd service, nginx and a Let's Encrypt certificate without touching the other sites; users and the View only / Analyze / Admin permissions on the Maintenance page; updating with update.sh and rolling back; backups, moving and removing; security, troubleshooting and a quick reference of the server commands.",
+    "date": "2026-11-09"
+  }
+]

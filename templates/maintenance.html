@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ app_name }} — maintenance</title>
+<script>
+(function () {
+    try {
+        var m = localStorage.getItem('fwa_theme_mode');
+        var light = m === 'light' || ((m !== 'dark') && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+        if (light) document.documentElement.classList.add('light');
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=version) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css', v=version) }}">
+</head>
+<body class="admin-page">
+<div class="admin-wrap">
+    <div class="admin-top">
+        <a class="admin-brand" href="/">📡 {{ app_name }}</a><span class="admin-crumb">⚙️ Maintenance</span>
+        <span class="grow"></span>
+        <a class="btn ghost" href="/">← Back to {{ app_name }}</a>
+        {% if not user.open %}<a class="btn ghost" href="/account">👤 {{ user.username }}</a>
+        <form method="post" action="/logout"><button class="btn ghost" type="submit">⏻ Sign out</button></form>{% endif %}
+    </div>
+
+    {% if user.open %}
+    <div class="warn-box">No users yet, so {{ app_name }} is open to anyone who can reach it. The first user you add here becomes an <b>Admin</b>; from then on every page needs a sign-in. On a server, add the first admin from the command line instead: <code>python harava.py --add-admin</code>.</div>
+    {% endif %}
+
+    <div class="card">
+        <h2>Users</h2>
+        <p class="note"><span class="role-pill role-view">View only</span> sees the map, the lists, the Phone check and the Identification page, and can export CSV.
+           <span class="role-pill role-analyze">Analyze</span> can also upload and import Fieldwatch exports, switch or delete imports, edit My devices and reload the identification database.
+           <span class="role-pill role-admin">Admin</span> can also manage users here.</p>
+        <table class="grid" id="userTable">
+            <thead><tr><th>Username</th><th>First name</th><th>Last name</th><th>Permission</th><th>Active</th><th>Last sign-in</th><th></th></tr></thead>
+            <tbody id="userBody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Add a user</h2>
+        <form class="user-form" onsubmit="return addUser(event)">
+            <label>Username<input type="text" id="nuName" required pattern="[A-Za-z0-9._@\-]{3,64}" autocapitalize="none" spellcheck="false" placeholder="e.g. matti"></label>
+            <label>First name<input type="text" id="nuFirst" maxlength="80"></label>
+            <label>Last name<input type="text" id="nuLast" maxlength="80"></label>
+            <label>Permission<select id="nuRole">{% for k, v in roles.items() %}<option value="{{ k }}"{% if k == 'view' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+            <button class="btn" type="submit">＋ Add user</button>
+        </form>
+        <p class="note">Harava makes a one-time password for the new user and shows it once. Give it to them; at the first sign-in they choose their own password (at least {{ pw_min }} characters).</p>
+        <div class="msg" id="addMsg"></div>
+    </div>
+
+    <div class="card">
+        <h2>Recent sign-ins and changes</h2>
+        <table class="grid">
+            <thead><tr><th>Time</th><th>User</th><th>Address</th><th>Event</th></tr></thead>
+            <tbody id="logBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="admin-dialog-back" id="dlgBack" onclick="if (event.target === this) closeDlg()">
+    <div class="admin-dialog"><div id="dlgBody"></div><div style="text-align:right;margin-top:14px"><button class="btn" onclick="closeDlg()">Close</button></div></div>
+</div>
+
+<script>
+const ROLES = {{ roles|tojson }};
+let ME = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = ts => ts ? ts.replace('T', ' ').slice(0, 16) : '—';
+
+async function call(url, opts) {
+    const r = await fetch(url, opts);
+    if (r.status === 401) { location.href = '/login'; throw new Error('sign in'); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+}
+const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+async function load() {
+    const d = await call('/api/users');
+    ME = d.me;
+    $('userBody').innerHTML = d.users.map(u => `<tr data-id="${u.id}">
+        <td><b>${esc(u.username)}</b>${u.id === ME ? ' <span class="you">you</span>' : ''}${u.must_change ? ' <span class="tag" title="Has a one-time password">new password</span>' : ''}</td>
+        <td><input type="text" value="${esc(u.first_name)}" maxlength="80" onchange="edit(${u.id}, {first_name: this.value})"></td>
+        <td><input type="text" value="${esc(u.last_name)}" maxlength="80" onchange="edit(${u.id}, {last_name: this.value})"></td>
+        <td><select onchange="edit(${u.id}, {role: this.value})">${Object.entries(ROLES).map(([k, v]) =>
+            `<option value="${k}"${k === u.role ? ' selected' : ''}>${v}</option>`).join('')}</select></td>
+        <td><label class="switch"><input type="checkbox" ${u.active ? 'checked' : ''} ${u.id === ME ? 'disabled' : ''} onchange="edit(${u.id}, {active: this.checked})"><span></span></label></td>
+        <td>${fmt(u.last_login)}</td>
+        <td class="actions"><button class="btn ghost" onclick="resetPw(${u.id}, '${esc(u.username)}')">New password</button>
+            ${u.id === ME ? '' : `<button class="btn danger" onclick="delUser(${u.id}, '${esc(u.username)}')">Remove</button>`}</td></tr>`).join('')
+        || '<tr><td colspan="7" class="empty">No users yet.</td></tr>';
+    $('logBody').innerHTML = d.log.map(l => `<tr class="${l.event.startsWith('failed') ? 'bad' : ''}">
+        <td>${fmt(l.ts)}</td><td>${esc(l.username)}</td><td class="mono">${esc(l.ip)}</td><td>${esc(l.event)}</td></tr>`).join('')
+        || '<tr><td colspan="4" class="empty">Nothing yet.</td></tr>';
+}
+async function edit(id, change) {
+    try { await call(`/api/users/${id}`, json('PUT', change)); }
+    catch (e) { alertDlg(`<h3>Not changed</h3><p>${esc(e.message)}</p>`); }
+    load();
+}
+function showTemp(user, pw, what) {
+    alertDlg(`<h3>${what}</h3><p>One-time password for <b>${esc(user)}</b>:</p>
+        <div class="temp-pw" id="tempPw">${esc(pw)}</div>
+        <p class="note">It is shown only now. ${esc(user)} must choose an own password at the next sign-in.</p>
+        <button class="btn ghost" onclick="navigator.clipboard.writeText('${esc(pw)}').then(() => this.textContent = 'Copied ✓')">Copy</button>`);
+}
+async function addUser(ev) {
+    ev.preventDefault();
+    const body = { username: $('nuName').value.trim(), first_name: $('nuFirst').value, last_name: $('nuLast').value, role: $('nuRole').value };
+    try {
+        const r = await call('/api/users', json('POST', body));
+        ev.target.reset();
+        $('addMsg').textContent = '';
+        if (r.temp_password) showTemp(body.username, r.temp_password, 'User added');
+        if (ME === 0) { setTimeout(() => location.href = '/login', 100); }   // the first user: sign-in is on now
+    } catch (e) { $('addMsg').className = 'msg err'; $('addMsg').textContent = e.message; }
+    load();
+    return false;
+}
+async function resetPw(id, name) {
+    if (!confirm(`Make a new one-time password for ${name}? Their current password stops working and they are signed out.`)) return;
+    try { const r = await call(`/api/users/${id}/password`, { method: 'POST' }); showTemp(name, r.temp_password, 'New password'); }
+    catch (e) { alertDlg(`<h3>Not changed</h3><p>${esc(e.message)}</p>`); }
+    load();
+}
+async function delUser(id, name) {
+    if (!confirm(`Remove ${name}? They cannot sign in any more. Their imports and My devices stay.`)) return;
+    try { await call(`/api/users/${id}`, { method: 'DELETE' }); }
+    catch (e) { alertDlg(`<h3>Not removed</h3><p>${esc(e.message)}</p>`); }
+    load();
+}
+function alertDlg(html) { $('dlgBody').innerHTML = html; $('dlgBack').classList.add('open'); }
+function closeDlg() { $('dlgBack').classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDlg(); });
+load();
+</script>
+</body>
+</html>

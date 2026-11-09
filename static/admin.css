@@ -1,0 +1,55 @@
+/* Harava: the maintenance and account pages (on top of app.css) */
+body.admin-page { background: var(--bg-base); color: var(--text-primary); overflow: auto; height: auto; min-height: 100vh; display: block; }
+.admin-wrap { max-width: 1100px; margin: 0 auto; padding: 18px 20px 40px; }
+.admin-wrap.narrow { max-width: 560px; }
+.admin-top { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.admin-top form { display: inline; margin: 0; }
+.admin-top .grow { flex: 1; }
+.admin-brand { font-size: 20px; font-weight: 700; color: var(--accent); text-decoration: none; }
+.admin-crumb { color: var(--text-secondary); font-size: 15px; margin-left: 4px; }
+.admin-page a.btn { text-decoration: none; display: inline-block; }
+.admin-page .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+.admin-page h2 { font-size: 17px; color: var(--accent); margin-bottom: 8px; }
+.admin-page h3 { font-size: 14px; margin: 16px 0 8px; }
+.admin-page .note { font-size: 12px; margin: 0 0 10px; }
+.admin-page code { font-family: Consolas, monospace; font-size: 12px; background: var(--bg-deep); padding: 1px 5px; border-radius: 4px; }
+.admin-page table.grid tbody tr { cursor: default; }
+.admin-page table.grid td { max-width: none; vertical-align: middle; }
+.admin-page table.grid td input[type=text], .admin-page table.grid td select { width: 100%; min-width: 90px; padding: 4px 6px; font-size: 12.5px;
+    background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border); border-radius: 5px; }
+.admin-page table.grid td.actions { text-align: right; white-space: nowrap; }
+.admin-page table.grid td.actions .btn { padding: 3px 9px; font-size: 12px; }
+.admin-page table.grid tr.bad td { color: var(--red); }
+.admin-page .empty { text-align: center; color: var(--text-muted); padding: 14px; }
+.admin-page .you { font-size: 10.5px; color: var(--accent); border: 1px solid var(--accent-dim); border-radius: 8px; padding: 0 5px; margin-left: 4px; }
+.admin-page .tag { font-size: 10.5px; color: var(--amber); border: 1px solid var(--amber); border-radius: 8px; padding: 0 5px; margin-left: 4px; }
+.user-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.user-form label, #pwForm label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.user-form input, .user-form select, #pwForm input { padding: 7px 9px; font-size: 13px; background: var(--input-bg); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px; min-width: 150px; }
+#pwForm { display: flex; flex-direction: column; gap: 10px; }
+#pwForm .btn { align-self: flex-start; }
+.msg { margin-top: 8px; font-size: 13px; }
+.msg.err { color: var(--red); }
+.msg.ok { color: var(--green); }
+.warn-box { border: 1px solid var(--amber); color: var(--text-primary); background: color-mix(in srgb, var(--amber) 12%, transparent);
+    border-radius: 8px; padding: 10px 12px; margin: 10px 0 14px; font-size: 13px; line-height: 1.45; }
+table.kv td { padding: 4px 14px 4px 0; font-size: 13px; }
+table.kv td:first-child { color: var(--text-secondary); }
+.role-pill { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 9px; padding: 1px 8px; border: 1px solid; }
+.role-view { color: var(--text-secondary); border-color: var(--border); }
+.role-analyze { color: var(--green); border-color: var(--green); }
+.role-admin { color: var(--accent); border-color: var(--accent); }
+.temp-pw { font-family: Consolas, monospace; font-size: 18px; letter-spacing: 1px; padding: 10px 12px; margin: 8px 0;
+    background: var(--bg-deep); border: 1px dashed var(--accent-dim); border-radius: 6px; user-select: all; }
+.admin-dialog-back { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 50; }
+.admin-dialog-back.open { display: flex; }
+.admin-dialog { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; width: 420px; max-width: calc(100vw - 32px); }
+.admin-dialog h3 { margin-top: 0; }
+.admin-dialog p { font-size: 13px; margin: 6px 0; }
+
+/* the main page: hide what this permission cannot use */
+body.role-view .needs-analyze { display: none !important; }
+.sb-user { font-size: 11.5px; color: var(--text-secondary); margin-top: 3px; }
+.sb-user a { color: var(--text-secondary); text-decoration: none; }
+.sb-user a:hover { color: var(--accent); }

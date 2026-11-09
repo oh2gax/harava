@@ -1,0 +1,26 @@
+# systemd unit for Harava on the AWS server (harava.oh2gax.org).
+# Install:  sudo cp ~/harava/deploy/harava.service /etc/systemd/system/harava.service
+#           sudo systemctl daemon-reload && sudo systemctl enable --now harava
+# Change User / paths if your user is not "ubuntu" or Harava is not in /home/ubuntu/harava.
+[Unit]
+Description=Harava - Fieldwatch log analyzer (harava.oh2gax.org)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/harava
+ExecStart=/home/ubuntu/harava/venv/bin/python harava.py --no-browser
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=10
+# light hardening that does not touch other services
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

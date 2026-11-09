@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ app_name }} — my account</title>
+<script>
+(function () {
+    try {
+        var m = localStorage.getItem('fwa_theme_mode');
+        var light = m === 'light' || ((m !== 'dark') && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+        if (light) document.documentElement.classList.add('light');
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=version) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css', v=version) }}">
+</head>
+<body class="admin-page">
+<div class="admin-wrap narrow">
+    <div class="admin-top">
+        <a class="admin-brand" href="/">📡 {{ app_name }}</a>
+        <span class="grow"></span>
+        {% if user.role == 'admin' and not user.open %}<a class="btn ghost" href="/maintenance">⚙️ Maintenance</a>{% endif %}
+        <form method="post" action="/logout"><button class="btn ghost" type="submit">⏻ Sign out</button></form>
+    </div>
+    <div class="card">
+        <h2>My account</h2>
+        {% if user.open %}
+            <p class="note">No users have been added, so {{ app_name }} is open on this computer. Add the first admin with <code>python harava.py --add-admin</code>.</p>
+        {% else %}
+            <table class="kv">
+                <tr><td>Username</td><td><b>{{ user.username }}</b></td></tr>
+                <tr><td>Name</td><td>{{ user.first_name }} {{ user.last_name }}</td></tr>
+                <tr><td>Permission</td><td><span class="role-pill role-{{ user.role }}">{{ user.role_name }}</span></td></tr>
+            </table>
+            {% if user.must_change %}
+            <div class="warn-box">Your password was set by the admin. Choose your own password before you continue.</div>
+            {% endif %}
+            <h3>Change password</h3>
+            <form id="pwForm" onsubmit="return changePw(event)">
+                <label>Current password<input type="password" id="pwCur" autocomplete="current-password" required></label>
+                <label>New password (at least 12 characters)<input type="password" id="pwNew" autocomplete="new-password" minlength="12" required></label>
+                <label>Repeat the new password<input type="password" id="pwNew2" autocomplete="new-password" minlength="12" required></label>
+                <button class="btn" type="submit">Change password</button>
+                <div class="msg" id="pwMsg"></div>
+            </form>
+            {% if not user.must_change %}<p style="margin-top:14px"><a href="/">← Back to {{ app_name }}</a></p>{% endif %}
+        {% endif %}
+    </div>
+</div>
+<script>
+async function changePw(ev) {
+    ev.preventDefault();
+    const msg = document.getElementById('pwMsg');
+    const cur = document.getElementById('pwCur').value, nw = document.getElementById('pwNew').value;
+    if (nw !== document.getElementById('pwNew2').value) { msg.className = 'msg err'; msg.textContent = 'The new passwords differ.'; return false; }
+    const r = await fetch('/api/account/password', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ current: cur, new: nw }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { msg.className = 'msg ok'; msg.textContent = 'Password changed.'; setTimeout(() => location.href = '/', 900); }
+    else { msg.className = 'msg err'; msg.textContent = j.error || 'Could not change the password.'; }
+    return false;
+}
+</script>
+</body>
+</html>

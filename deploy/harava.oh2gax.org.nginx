@@ -1,0 +1,31 @@
+# nginx site for Harava. Only this server_name is handled here, so the other sites
+# (WSPR Logger etc.) are not touched.
+# Install:  sudo cp ~/harava/deploy/harava.oh2gax.org.nginx /etc/nginx/sites-available/harava.oh2gax.org
+#           sudo ln -s /etc/nginx/sites-available/harava.oh2gax.org /etc/nginx/sites-enabled/
+#           sudo nginx -t && sudo systemctl reload nginx
+#           sudo certbot --nginx -d harava.oh2gax.org      (adds HTTPS to this file only)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name harava.oh2gax.org;
+
+    # Fieldwatch exports can be large; Harava itself accepts up to 512 MB
+    client_max_body_size 512m;
+
+    # keep search engines away (the page needs a sign-in anyway)
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:5057;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        # big uploads take a while to import
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_request_buffering off;
+    }
+}
