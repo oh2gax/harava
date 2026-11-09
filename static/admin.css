@@ -1,5 +1,6 @@
 /* Harava: the maintenance and account pages (on top of app.css) */
-body.admin-page { background: var(--bg-base); color: var(--text-primary); overflow: auto; height: auto; min-height: 100vh; display: block; }
+/* app.css locks html and body for the map view; here the body is the page's own scroll area */
+body.admin-page { background: var(--bg-base); color: var(--text-primary); overflow-x: hidden; overflow-y: auto; height: 100vh; height: 100dvh; display: block; }
 .admin-wrap { max-width: 1100px; margin: 0 auto; padding: 18px 20px 40px; }
 .admin-wrap.narrow { max-width: 560px; }
 .admin-top { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }

@@ -197,6 +197,13 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
   signing key is random and kept in `.harava_secret` (mode 600, not in git).
 - `harava_users.db` is created with mode 600; the systemd unit sets `UMask=0077`.
 
+### Fixed
+- Workbench, Maintenance and Account pages could not scroll: `app.css` locks `html` and `body`
+  (`overflow: hidden`) for the map view, and `body.admin-page` only set `overflow: auto` with
+  `height: auto`, so nothing scrolled and the bottom of a long page (the Workbench's *Make a rule*
+  and *Local rules*) was out of reach. The admin body is now its own scroll area (`height: 100dvh`,
+  `overflow-y: auto`).
+
 ## [2026-11-08]
 
 ### Added
