@@ -44,6 +44,14 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
   follow Finnish time (the server itself runs in UTC).
 
 ### Added
+- **Share target** — the phone app's manifest has `share_target` (POST multipart `files` to
+  `/app/share`; CSV, JSON lines, KML, zip) and `id`. `static/app-sw.js`, served as `/app/sw.js`
+  (scope `/app/`, open endpoint, `Cache-Control: no-cache`), catches that POST on the phone, keeps
+  the files in cache storage `harava-share` (with `/app/shared-meta`) and redirects to
+  `/app?shared=N`; `m-app.js` registers it and uploads pending shares through `/api/import`
+  (at once with one phone, otherwise after choosing one; Analyze needed; shares older than 24 h
+  dropped; kept across a sign-in). Nothing else is cached. Without the worker, `POST /app/share`
+  only shows a help page and never imports (no Origin check there, so it must not act).
 - **APIs** — `GET/POST /api/scope`, `GET /api/people`, `GET/POST /api/collectors`,
   `POST /api/imports/<id>/share`, `POST /api/imports/<id>/reread`; `/api/import` takes `collector`
   and `.zip`; `/api/imports` returns owner, phone, verdict, sharing and `can_edit`; toggle, delete,

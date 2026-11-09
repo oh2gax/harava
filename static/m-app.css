@@ -403,3 +403,4 @@ html.light .m-form input { color-scheme: light; }
 .m-imp .acts { display: flex; flex-direction: column; gap: 4px; flex: none; }
 .m-imp .acts .app-btn { min-height: 30px; padding: 2px 10px; font-size: 12px; }
 .m-imp .t select { margin-top: 4px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: var(--bg-2); color: var(--text-1); border: 1px solid var(--border); }
+.m-share { border-color: var(--accent); }

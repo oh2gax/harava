@@ -323,7 +323,9 @@ Every device class in Fieldwatch's signature catalogue is its own map layer, wit
 | **Imports** | upload Fieldwatch exports straight from the phone; switch or delete imports |
 | **Workbench** | admins only: the unknown radios, their status and notes, and rules |
 
-It uses the same sign-in, permissions and data as the full site, and *Mask addresses* (in ☰ → General) works there too. Add it to the home screen (Chrome: ⋮ → *Add to Home screen*; Safari: Share → *Add to Home Screen*) and it opens without the browser bars. Back on the phone closes the menu or a window, or goes to the previous view. When the server gets a new version, or after an hour in the background, the app reloads itself. The Harava Mobile app User Guide (*User guides*) has the details.
+It uses the same sign-in, permissions and data as the full site, and *Mask addresses* (in ☰ → General) works there too.
+
+**Share → Harava.** Installed from Chrome on Android (⋮ → *Install app*), Harava appears in the share menu. In Fieldwatch, export the log or Sit, tap *Share* and pick *Harava*: the phone app opens and imports the file (choosing the phone first if you have several). Fieldwatch keeps its live log in private storage and has no upload of its own, so this is the shortest way from Fieldwatch into Harava. The manifest's `share_target` posts the file to `/app/share`, where the app's service worker (`/app/sw.js`) holds it on the phone until the app uploads it with your sign-in. Add it to the home screen (Chrome: ⋮ → *Add to Home screen*; Safari: Share → *Add to Home Screen*) and it opens without the browser bars. Back on the phone closes the menu or a window, or goes to the previous view. When the server gets a new version, or after an hour in the background, the app reloads itself. The Harava Mobile app User Guide (*User guides*) has the details.
 
 ## Imports, phones and whose data
 

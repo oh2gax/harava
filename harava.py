@@ -1607,7 +1607,7 @@ USERS_DB = os.path.join(HERE, "harava_users.db")
 SECRET_FILE = os.path.join(HERE, ".harava_secret")
 ROLES = {"view": "View only", "analyze": "Analyze", "admin": "Admin"}
 ROLE_RANK = {"view": 1, "analyze": 2, "admin": 3}
-OPEN_ENDPOINTS = {"login", "logout", "static", "healthz", "app_manifest"}
+OPEN_ENDPOINTS = {"login", "logout", "static", "healthz", "app_manifest", "app_sw", "app_share"}
 PW_MIN = 12
 _fails = defaultdict(list)                                   # ip -> times of failed sign-ins
 _fails_lock = threading.Lock()
@@ -1740,6 +1740,8 @@ def _same_origin():
 
 @app.before_request
 def guard():
+    if request.endpoint == "app_share":
+        return None                          # never imports anything itself (see app_share)
     if request.method in ("POST", "PUT", "DELETE", "PATCH") and not _same_origin():
         return jsonify({"error": "request from another site refused"}), 403
     if request.endpoint in OPEN_ENDPOINTS:
@@ -2099,12 +2101,46 @@ def app_manifest():
         "description": "What your phone heard with Fieldwatch: map, devices, watch list, phone check",
         "start_url": "/app", "scope": "/app", "display": "standalone", "orientation": "any",
         "background_color": "#111827", "theme_color": "#111827",
+        "id": "/app",
         "icons": [
             {"src": "/static/icons/app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
             {"src": "/static/icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
         ],
+        # "Share → Harava": the installed app appears in Android's share menu for Fieldwatch exports.
+        # The service worker (/app/sw.js) catches the POST on the phone and the app uploads the files.
+        "share_target": {
+            "action": "/app/share", "method": "POST", "enctype": "multipart/form-data",
+            "params": {"title": "title", "text": "text", "files": [{"name": "files", "accept": [
+                "text/csv", ".csv", "application/x-ndjson", ".jsonl", "application/json", ".json",
+                "application/vnd.google-earth.kml+xml", ".kml", "application/zip", ".zip", "text/plain"]}]},
+        },
     }
     return Response(json.dumps(man), mimetype="application/manifest+json")
+
+
+@app.route("/app/sw.js")
+def app_sw():
+    """The phone app's service worker; it lives under /app/ so that it may handle /app/share."""
+    resp = send_from_directory(os.path.join(HERE, "static"), "app-sw.js", mimetype="application/javascript")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Service-Worker-Allowed"] = "/app/"
+    return resp
+
+
+@app.route("/app/share", methods=["GET", "POST"])
+def app_share():
+    """Reached only when the service worker did not catch a share (not installed yet, or an old
+    browser). It never imports: a POST from another app carries no proof of who sent it."""
+    if request.method == "GET":
+        return redirect("/app")
+    html = ("<!DOCTYPE html><meta name=viewport content='width=device-width,initial-scale=1'><title>Harava</title>"
+            "<body style='font-family:system-ui,sans-serif;padding:24px;line-height:1.5;max-width:520px'>"
+            "<h2 style='color:#0369a1'>Harava could not take the file yet</h2>"
+            "<p>Open Harava once from its icon on the home screen (and sign in): that starts its share helper. "
+            "Then share the file from Fieldwatch again.</p>"
+            "<p>Harava must be installed from <b>Chrome</b> (⋮ → <i>Install app</i> or <i>Add to Home screen</i>).</p>"
+            "<p><a href='/app'>Open Harava</a></p></body>")
+    return Response(html, 200, mimetype="text/html")
 
 
 @app.route("/api/summary")

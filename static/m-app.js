@@ -744,15 +744,76 @@
     if (!files.length) return;
     const fd = new FormData(); files.forEach(f => fd.append('files', f));
     if ($('m-imp-phone').value) fd.append('collector', $('m-imp-phone').value);
-    $('m-imp-res').innerHTML = `<div class="skip">Uploading and importing ${files.length} file(s)…</div>`;
+    await uploadFormData(fd, files.length, $('m-imp-res'));
+  });
+  const resultsHtml = r => r.results.map(x => x.status === 'imported'
+    ? `<div class="ok">✔ ${esc(x.file)} — ${vTag(x)} ${n0(x.rows)} rows${x.verdict !== 'new' && x.verdict !== 'sit update' ? `, ${n0(x.new_rows)} new` : ''}${x.note ? ' (' + esc(x.note) + ')' : ''}</div>`
+    : x.status === 'skipped' ? `<div class="skip">– ${esc(x.file)} — ${esc(x.reason)}</div>` : `<div class="err">✖ ${esc(x.file)} — ${esc(x.reason)}</div>`).join('');
+  async function uploadFormData(fd, n, out) {
+    out.innerHTML = `<div class="skip">Uploading and importing ${n} file(s)…</div>`;
     try {
       const r = await api('/api/import', { method: 'POST', body: fd });
-      $('m-imp-res').innerHTML = r.results.map(x => x.status === 'imported'
-        ? `<div class="ok">✔ ${esc(x.file)} — ${vTag(x)} ${n0(x.rows)} rows${x.verdict !== 'new' && x.verdict !== 'sit update' ? `, ${n0(x.new_rows)} new` : ''}${x.note ? ' (' + esc(x.note) + ')' : ''}</div>`
-        : x.status === 'skipped' ? `<div class="skip">– ${esc(x.file)} — ${esc(x.reason)}</div>` : `<div class="err">✖ ${esc(x.file)} — ${esc(x.reason)}</div>`).join('');
+      out.innerHTML = resultsHtml(r);
       await loadSummary(); S.loadedFor = null; loadImports();
-    } catch (err) { $('m-imp-res').innerHTML = `<div class="err">✖ ${esc(err.message)}</div>`; }
-  });
+      return true;
+    } catch (err) { out.innerHTML = `<div class="err">✖ ${esc(err.message)}</div>`; return false; }
+  }
+
+  // ── "Share → Harava": files another app (Fieldwatch) shared to the installed app ──
+  // The service worker (/app/sw.js) keeps them in cache storage; here they are uploaded like
+  // "Choose files…": at once with one phone, after choosing the phone with several.
+  const SHARE_CACHE = 'harava-share';
+  async function sharedFiles() {
+    if (!('caches' in window)) return null;
+    const cache = await caches.open(SHARE_CACHE);
+    const metaR = await cache.match('/app/shared-meta');
+    if (!metaR) return null;
+    const meta = await metaR.json();
+    if (Date.now() - (meta.at || 0) > 24 * 3600e3) { await caches.delete(SHARE_CACHE); return null; }
+    const files = [];
+    for (let i = 0; i < meta.n; i++) {
+      const r = await cache.match(`/app/shared-file/${i}`);
+      if (!r) continue;
+      const name = decodeURIComponent(r.headers.get('X-Harava-Name') || `shared-${i + 1}`);
+      files.push(new File([await r.blob()], name, { type: r.headers.get('Content-Type') || '' }));
+    }
+    return { meta, files };
+  }
+  async function dropShared() { try { await caches.delete(SHARE_CACHE); } catch (_) { /* */ } }
+  async function handleShared(fromShare) {
+    let got = null;
+    try { got = await sharedFiles(); } catch (_) { got = null; }
+    const card = $('m-share-card'), body = $('m-share-body');
+    if (fromShare === '-1' && !got) { setView('imp'); card.hidden = false; body.innerHTML = '<div class="err">✖ The shared file could not be read. Share it again, or use Choose files…</div>'; return; }
+    if (!got || !got.files.length) return;
+    setView('imp');
+    card.hidden = false;
+    $('m-share-n').textContent = `${got.files.length} file${got.files.length > 1 ? 's' : ''}`;
+    const names = got.files.map(f => `<div class="m-small">📄 ${esc(f.name)} · ${(f.size / 1024).toFixed(0)} kB</div>`).join('');
+    if (!can('analyze')) {
+      body.innerHTML = names + '<div class="err">Importing needs the <i>Analyze</i> permission. Ask the admin.</div>';
+      await dropShared(); return;
+    }
+    let phones = [];
+    try { phones = (await api('/api/collectors')).collectors; } catch (_) { /* */ }
+    const go = async cid => {
+      const fd = new FormData();
+      got.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => fd.append('files', f));
+      if (cid) fd.append('collector', cid);
+      body.innerHTML = names + '<div class="m-res" id="m-share-res"></div>';
+      const ok = await uploadFormData(fd, got.files.length, $('m-share-res'));
+      if (ok) await dropShared();
+      else body.insertAdjacentHTML('beforeend', '<div class="m-btn-row"><button type="button" class="app-btn" id="m-share-retry">Try again</button></div>');
+      const rt = $('m-share-retry'); if (rt) rt.addEventListener('click', () => handleShared(''));
+    };
+    if (phones.length <= 1) { await go(phones.length ? phones[0].id : ''); return; }
+    const last = lsGet('harava_phone', '');
+    body.innerHTML = names + `<div class="app-subrow"><span>Phone</span><select id="m-share-phone" class="m-sel">${phones.map(c =>
+      `<option value="${c.id}" ${String(c.id) === last ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="m-btn-row"><button type="button" class="app-btn" id="m-share-drop">Discard</button><button type="button" class="app-btn app-btn-primary" id="m-share-go">Import</button></div>`;
+    $('m-share-go').addEventListener('click', () => { lsSet('harava_phone', $('m-share-phone').value); go($('m-share-phone').value); });
+    $('m-share-drop').addEventListener('click', async () => { await dropShared(); card.hidden = true; toast('Discarded'); });
+  }
   let IMPS = [];
   async function loadImports() {
     loadPhones().catch(() => {});
@@ -766,7 +827,7 @@
         <div class="t"><b>${esc(i.filename)}</b>
           <small>${vTag(i)} ${i.ftype.toUpperCase()} · ${n0(i.rows)} rows${i.verdict === 'extends' || i.verdict === 'overlaps' ? ` (+${n0(i.new_rows)})` : ''} · ${i.first_ts ? fmtTime(i.first_ts, true).slice(5, 16) + ' → ' + fmtTime(i.last_ts, true).slice(5, 16) : ''}</small>
           <small>${multi || !i.mine ? esc(i.owner_name) + ' · ' : ''}${esc(i.phone)}${i.shared_with ? ' · shared: ' + esc(i.shared_with) : ''}</small>
-          ${i.note ? `<small style="color:var(--amber)">${esc(i.note)}</small>` : ''}
+          ${i.note ? `<small style="color:var(--text-3)">${esc(i.note)}</small>` : ''}
           ${i.mine && ed(i) && !F.open ? `<select data-share="${i.id}" aria-label="Sharing"><option value="">Private</option><option value="*" ${i.shared_with === 'all users' ? 'selected' : ''}>Shared with all users</option>${i.shared_with && i.shared_with !== 'all users' ? '<option value="keep" selected>Shared with chosen users</option>' : ''}</select>` : ''}</div>
         ${ed(i) ? `<div class="acts">${i.rereadable ? `<button type="button" class="app-btn" data-rr="${i.id}">Re-read</button>` : ''}<button type="button" class="app-btn del" data-del="${i.id}" data-name="${esc(i.filename)}">Delete</button></div>` : ''}</div>`).join('')
       || '<div class="m-empty">Nothing imported yet.</div>';
@@ -1045,6 +1106,11 @@
 
   // ── start ──
   $('app-sub').textContent = '';
-  try { history.replaceState({ app: 'view', view }, ''); } catch (_) { /* */ }
-  loadSummary().then(() => setView(view, false, true)).catch(e => toast('Could not load data: ' + e.message));
+  const sharedParam = new URLSearchParams(location.search).get('shared');
+  try { history.replaceState({ app: 'view', view }, '', sharedParam !== null ? '/app' : location.href); } catch (_) { /* */ }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/app/sw.js', { scope: '/app/' }).catch(() => { /* sharing just stays off */ });
+  }
+  loadSummary().then(() => { setView(view, false, true); return handleShared(sharedParam); })
+    .catch(e => toast('Could not load data: ' + e.message));
 })();

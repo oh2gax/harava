@@ -53,7 +53,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava Mobile app --- what your phone heard, in your pocket}
-\fancyhead[R]{\small\itshape Mobile app user guide, version 1.1 --- November 2026}
+\fancyhead[R]{\small\itshape Mobile app user guide, version 1.2 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava Mobile app - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -81,7 +81,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.1 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.2 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava Mobile app}\par\vspace{5pt}
 {\large\bfseries The map, the day, the watch list, every radio, the phone check and uploads ---\\ on your phone, one view at a time}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -95,7 +95,7 @@
 \item \textbf{Map}, \textbf{Day} and \textbf{Watch list} --- what was around you, when, and what deserves a closer look (Sections~\ref{sec:map}--\ref{sec:watch});
 \item \textbf{Devices} and a page for every radio, with \ui{＋ My device} (Section~\ref{sec:devices});
 \item the classroom \textbf{Phone check} and the \textbf{Identification} summary (Sections~\ref{sec:phone}--\ref{sec:ids});
-\item \textbf{Imports}: upload Fieldwatch exports straight from the phone that made them (Section~\ref{sec:imp});
+\item \textbf{Imports}: upload Fieldwatch exports straight from the phone that made them, or share them from Fieldwatch to Harava (Sections~\ref{sec:imp}--\ref{sec:share});
 \item for admins, the \textbf{Workbench}: the radios Harava cannot name yet, notes, and new rules (Section~\ref{sec:wb}).
 \end{itemize}
 How to collect with Fieldwatch, and what the data can and cannot tell, is in the \emph{Harava -- User guide}; this guide is about the phone app.}
@@ -112,7 +112,7 @@ How to collect with Fieldwatch, and what the data can and cannot tell, is in the
 
 \lead{Add it to the home screen.} Then it opens with one tap, on the whole screen, without the browser's address bar:
 \begin{itemize}[leftmargin=1.2em]
-\item \textbf{Android, Chrome:} \ui{⋮} (top right) $\rightarrow$ \ui{Add to Home screen} (or \ui{Install app}) $\rightarrow$ \ui{Add}.
+\item \textbf{Android, Chrome:} \ui{⋮} (top right) $\rightarrow$ \ui{Install app} (or \ui{Add to Home screen}) $\rightarrow$ \ui{Install}. Installed this way, Harava also appears in Android's share menu (Section~\ref{sec:share}).
 \item \textbf{iPhone, Safari:} the Share button $\rightarrow$ \ui{Add to Home Screen} $\rightarrow$ \ui{Add}.
 \end{itemize}
 The icon is Harava's rake. The app remembers the view you used last, the day and all the options, on that phone.
@@ -310,6 +310,21 @@ You can choose every export you have at once: Fieldwatch's log export always con
 \end{figure}
 
 % ─────────────────────────────────────────────────────────────────────
+\section{Share from Fieldwatch straight to Harava}\label{sec:share}
+
+\phonestwo{m_share.jpg}{m_share_done.jpg}{fig:share}{A Fieldwatch export shared to Harava. With several phones Harava asks which one recorded it (left); with one phone it imports at once and tells what the file brought (right).}
+
+Fieldwatch keeps its log in its own private storage, which no other app can read, and it cannot upload anything itself. But when it exports, it can hand the file to another app through Android's \emph{share menu} --- and the installed Harava app is one of them:
+\begin{enumerate}[leftmargin=1.4em]
+\item Install Harava from \textbf{Chrome} (Section~\ref{sec:open}), open it once from its icon and sign in. This starts its small share helper on the phone.
+\item In Fieldwatch: \emph{Reports} $\rightarrow$ export the log (or the Sit) $\rightarrow$ \emph{Share}, and choose \textbf{Harava} in the share menu.
+\item Harava opens on \ui{Imports} with the card \ui{Shared to Harava}. With one phone the file is imported at once; with several, choose the \ui{Phone} and tap \ui{Import} (or \ui{Discard}).
+\end{enumerate}
+Because Harava keeps every hear only once per phone, you can share the whole log whenever you like: each export adds only what is new (\emph{extends~+N}), and the same file twice is skipped.
+
+\lead{Good to know.} A file shared while you are signed out waits on the phone: sign in and it is imported then (shares older than a day are dropped). Importing needs the \emph{Analyze} permission. If Harava answers \emph{could not take the file yet}, open Harava once from its icon and share again. Sharing works with Harava installed from Chrome on Android; the iPhone has no such share target for web apps (and Fieldwatch is an Android app).
+
+% ─────────────────────────────────────────────────────────────────────
 \section{Workbench (admins)}\label{sec:wb}
 
 The Workbench is where unknown radios become rules. It is for admins only, and it works on \emph{all days} at once.
@@ -398,7 +413,7 @@ see where a radio was heard & its page, the map at the bottom\\
 hide my own devices & a radio's page $\rightarrow$ \ui{＋ My device}; Filter $\rightarrow$ \ui{Hide my devices}\\
 see when glasses were near & Day $\rightarrow$ \ui{☰} $\rightarrow$ Day options $\rightarrow$ \ui{Timeline shows} \emph{Glasses \& VR}\\
 check the phone box & Phone check: window, \ui{Auto-calibrate}\\
-upload an export & Imports $\rightarrow$ \ui{Choose files…}\\
+upload an export & Imports $\rightarrow$ \ui{Choose files…}, or share it from Fieldwatch to \textbf{Harava}\\
 look at several days & \ui{☰} $\rightarrow$ \ui{Until}\\
 see shared or (admins) everyone's data & \ui{☰} $\rightarrow$ \ui{Whose data}\\
 share an import & Imports $\rightarrow$ \emph{Shared with all users}\\
