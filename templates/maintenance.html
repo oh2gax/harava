@@ -56,6 +56,23 @@
     </div>
 
     <div class="card">
+        <h2>Database snapshot</h2>
+        <p class="note">A complete copy of the data for analysis elsewhere, as one zip: the database, the Workbench's local rules and a short info file. It is made safely while Harava runs.
+           Save it on your computer outside the scan folder, e.g. in <code>tmp_files</code>, and keep it private: it holds where the phones were.</p>
+        <div class="user-form">
+            <label>Contents<select id="snapScope"><option value="mine">My data only</option><option value="all">Everyone's data</option></select></label>
+            <button class="btn" type="button" id="snapBtn" onclick="makeSnap()">📦 Make snapshot</button>
+        </div>
+        <div class="msg" id="snapMsg"></div>
+        <style>#snapBody td { white-space: normal; } #snapBody td:first-child { word-break: break-all; }</style>
+        <table class="grid" style="margin-top:10px">
+            <thead><tr><th>Snapshot</th><th>Made</th><th>By</th><th>Contents</th><th>Covers</th><th>Size</th><th></th></tr></thead>
+            <tbody id="snapBody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+        <p class="note" style="margin-top:8px">Click a snapshot to download it again. The server keeps the <span id="snapKeep">10</span> newest snapshots (in <code>snapshots/</code>, not in git). Making, downloading and deleting one is written to the log below.</p>
+    </div>
+
+    <div class="card">
         <h2>Recent sign-ins and changes</h2>
         <table class="grid">
             <thead><tr><th>Time</th><th>User</th><th>Address</th><th>Event</th></tr></thead>
@@ -142,6 +159,38 @@ function alertDlg(html) { $('dlgBody').innerHTML = html; $('dlgBack').classList.
 function closeDlg() { $('dlgBack').classList.remove('open'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDlg(); });
 load();
+
+const kb = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
+async function loadSnaps() {
+    const d = await call('/api/snapshots');
+    $('snapKeep').textContent = d.keep;
+    $('snapBody').innerHTML = d.snapshots.map(x => `<tr>
+        <td><a href="/api/snapshots/${encodeURIComponent(x.name)}" download title="Download">⬇ ${esc(x.name)}</a></td>
+        <td>${fmt(x.created)}</td><td>${esc(x.made_by)}</td>
+        <td>${esc(x.contents)}${x.imports != null ? ` · ${x.imports} imports · ${Number(x.hears).toLocaleString('en-GB')} hears` : ''}</td>
+        <td>${x.first ? fmt(x.first) + ' → ' + fmt(x.last) : '—'}</td><td>${kb(x.size)}</td>
+        <td class="actions"><button class="btn danger" onclick="delSnap('${esc(x.name)}')">Delete</button></td></tr>`).join('')
+        || '<tr><td colspan="7" class="empty">No snapshots yet.</td></tr>';
+}
+async function makeSnap() {
+    const mine = $('snapScope').value === 'mine';
+    $('snapBtn').disabled = true; $('snapMsg').className = 'msg'; $('snapMsg').textContent = 'Making the snapshot…';
+    try {
+        const r = await call('/api/snapshots', json('POST', { mine }));
+        $('snapMsg').className = 'msg ok';
+        $('snapMsg').innerHTML = `Ready: <a href="/api/snapshots/${encodeURIComponent(r.name)}" download>${esc(r.name)}</a> — ${esc(r.info.contents)}, ${r.info.imports} imports, ${Number(r.info.hears).toLocaleString('en-GB')} hears.`;
+        await loadSnaps();
+        location.href = '/api/snapshots/' + encodeURIComponent(r.name);          // start the download
+        load();
+    } catch (e) { $('snapMsg').className = 'msg err'; $('snapMsg').textContent = e.message; }
+    $('snapBtn').disabled = false;
+}
+async function delSnap(name) {
+    if (!confirm(`Delete ${name} from the server?`)) return;
+    try { await call('/api/snapshots/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (e) { alert(e.message); }
+    loadSnaps(); load();
+}
+loadSnaps();
 </script>
 </body>
 </html>

@@ -44,6 +44,14 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
   follow Finnish time (the server itself runs in UTC).
 
 ### Added
+- **Database snapshot** (Maintenance, admin) — `make_snapshot`: SQLite online backup of
+  `harava.db` into a temporary file; for *My data only* the other owners' imports, links, paths,
+  orphan hears, phones and My devices are deleted; then `journal_mode=DELETE` + `VACUUM` (no free
+  pages with removed data); zipped as `snapshots/harava_snapshot_YYYYMMDD_HHMMSS[_mine].zip` with
+  `local_rules.json` and `snapshot_info.json` (version, schema, created, made_by, contents, imports,
+  hears, first/last, owners), mode 0600, 10 newest kept. APIs `GET/POST /api/snapshots`,
+  `GET /api/snapshots/<name>` (download), `DELETE /api/snapshots/<name>`; names checked against
+  a pattern; every action in the auth log. `snapshots/` in `.gitignore` and skipped by Scan folder.
 - **Share target** — the phone app's manifest has `share_target` (POST multipart `files` to
   `/app/share`; CSV, JSON lines, KML, zip) and `id`. `static/app-sw.js`, served as `/app/sw.js`
   (scope `/app/`, open endpoint, `Cache-Control: no-cache`), catches that POST on the phone, keeps

@@ -218,6 +218,7 @@ Open `https://harava.oh2gax.org`, sign in with the admin of step 6, add users on
 
 ### Backups and removing
 
+- **For analysis elsewhere** use *Database snapshot* on the Maintenance page: it downloads a consistent copy of the database, the Workbench's local rules and an info file as one zip (*My data only* or *Everyone's data*); the server keeps the 10 newest in `snapshots/` (not in git).
 - `archive/` keeps a compressed copy of every uploaded export (for *Re-read*); it is not in git and not in the update backups (your exports are the originals).
 - The data that matters on the server: `harava.db` (imports, My devices, Workbench notes), `harava_users.db` (users), `ids/local_rules.json` (rules made in the Workbench), `config.ini`, `api_keys.py` and `.harava_secret` (the key that signs the sign-in cookies). `update.sh` copies both databases and the local rules to `~/harava_backups/` before every update; copy them off the server now and then (`scp`).
 - To remove Harava completely: `sudo systemctl disable --now harava`, `sudo rm /etc/systemd/system/harava.service /etc/nginx/sites-enabled/harava.oh2gax.org /etc/nginx/sites-available/harava.oh2gax.org`, `sudo nginx -t && sudo systemctl reload nginx`, `sudo certbot delete --cert-name harava.oh2gax.org`, and delete `~/harava`.
@@ -247,7 +248,7 @@ Without any users Harava is open (your own computer). With at least one user eve
 | **Admin** | the above, and manage users on **/maintenance** |
 
 - **The first admin** comes from the command line: `python harava.py --add-admin` (on the server: `venv/bin/python harava.py --add-admin`). The same command with an existing username sets a new password and makes that user an admin — the way back in after a forgotten password.
-- **/maintenance** (⚙️ *Maintenance* in the menu, admins only): every user with username, first and last name, permission, *active* switch and last sign-in; **＋ Add user**; **New password**; **Remove**; and the log of sign-ins, failed sign-ins and changes. A new user and a reset password get a **one-time password** that is shown once; at the first sign-in the user must choose their own (at least 12 characters).
+- **/maintenance** (⚙️ *Maintenance* in the menu, admins only): every user with username, first and last name, permission, *active* switch and last sign-in; **＋ Add user**; **New password**; **Remove**; **Database snapshot**; and the log of sign-ins, failed sign-ins and changes. A new user and a reset password get a **one-time password** that is shown once; at the first sign-in the user must choose their own (at least 12 characters).
 - **My account** (👤 your name in the menu): change your own password. Changing it signs out your other sessions.
 - Harava keeps at least one active admin: the last admin cannot be removed, disabled or demoted, and nobody can remove or disable themselves.
 - A permission change, a disabled user and a new password take effect at once, also for a user who is signed in.
@@ -472,7 +473,7 @@ api_keys.py.example       CARTO key template       (api_keys.py: local, not in g
 CHANGELOG.md              technical history
 ```
 
-Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data), `harava_users.db` (users), `.harava_secret` (cookie key), `ids/local_rules.json` (Workbench rules), `archive/` (kept originals), `data/` (your Fieldwatch exports) and `tmp_files/`.
+Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data), `harava_users.db` (users), `.harava_secret` (cookie key), `ids/local_rules.json` (Workbench rules), `archive/` (kept originals), `snapshots/` (database snapshots), `data/` (your Fieldwatch exports) and `tmp_files/`.
 
 ## REST API
 
@@ -491,6 +492,7 @@ All routes need a sign-in once users exist (otherwise `401`), and the routes tha
 | POST, DELETE | `/api/own`, `/api/own/<id>` | Analyze | My devices rules |
 | POST | `/api/ids/reload` | Analyze | read the identification files again |
 | GET, POST, PUT, DELETE | `/api/users`, `/api/users/<id>`, `/api/users/<id>/password` | Admin | users |
+| GET, POST, DELETE | `/api/snapshots`, `/api/snapshots/<name>` | Admin | list / make (`{"mine": true}`) / download / delete database snapshots |
 | GET | `/api/wb?tab=unknown\|weak\|nodata`, `/api/wb/fp?fp=`, `/api/wb/rules`, `/api/wb/export` | Admin | Workbench: kinds of unknown radios, one kind in detail, local rules, export |
 | POST, DELETE | `/api/wb/note`, `/api/wb/preview`, `/api/wb/rule`, `/api/wb/rule/<id>` | Admin | Workbench: status and note, test a match, save or remove a local rule |
 | GET | `/api/app/build` | View only | the phone app's build stamp (it reloads when this changes) |

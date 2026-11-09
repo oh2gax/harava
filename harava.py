@@ -1062,7 +1062,7 @@ def _avoid_double_counting(con, iid, ftype, first_ts, last_ts, collector_id):
 
 # Folders that Scan folder never enters (the app's own folders, also when the scan folder is the project root)
 SCAN_SKIP_DIRS = {".git", "__pycache__", "static", "templates", "doc", "venv", ".venv", "env",
-                  "node_modules", "tmp_files", "ids", "tools", "archive"}
+                  "node_modules", "tmp_files", "ids", "tools", "archive", "snapshots"}
 
 
 IMPORT_EXT = (".csv", ".jsonl", ".json", ".kml")
@@ -2282,6 +2282,147 @@ def api_export():
     name = "devices-export-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
     return Response(buf.getvalue().encode("utf-8-sig"), mimetype="text/csv",
                     headers={"Content-Disposition": f"attachment; filename={name}"})
+
+
+# ─────────────── database snapshots (Maintenance, admins) ───────────────
+# A complete, consistent copy of the data for analysis elsewhere, downloaded as one zip:
+# the database (SQLite online backup, safe while Harava runs, then VACUUM so that nothing removed
+# can be read from free pages), ids/local_rules.json and snapshot_info.json. "My data only" leaves
+# out every other user's imports, phones and My devices. Kept in snapshots/ (not in git), 10 newest.
+
+SNAP_DIR = os.path.join(HERE, "snapshots")
+SNAP_KEEP = 10
+_SNAP_NAME = re.compile(r"^harava_snapshot_\d{8}_\d{6}(_mine)?\.zip$")
+
+
+def make_snapshot(user, mine_only=False):
+    os.makedirs(SNAP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = f"harava_snapshot_{stamp}{'_mine' if mine_only else ''}"
+    tmp = os.path.join(SNAP_DIR, f".{base}.db")
+    try:
+        src = sqlite3.connect(CFG["db"], timeout=30)
+        dst = sqlite3.connect(tmp)
+        with dst:
+            src.backup(dst)
+        src.close()
+        uid = user["id"] if user else 0
+        if mine_only:
+            others = [r[0] for r in dst.execute("SELECT id FROM imports WHERE owner_id<>?", (uid,))]
+            for iid in others:
+                dst.execute("DELETE FROM import_rows WHERE import_id=?", (iid,))
+                dst.execute("DELETE FROM paths WHERE import_id=?", (iid,))
+                dst.execute("DELETE FROM imports WHERE id=?", (iid,))
+            dst.execute("DELETE FROM hears WHERE NOT EXISTS (SELECT 1 FROM import_rows r WHERE r.hear_id = hears.id)")
+            dst.execute("DELETE FROM collectors WHERE owner_id<>?", (uid,))
+            dst.execute("DELETE FROM own_devices WHERE owner_id<>?", (uid,))
+            dst.commit()
+        dst.execute("PRAGMA journal_mode=DELETE")
+        dst.execute("VACUUM")
+        n_imp = dst.execute("SELECT COUNT(*) FROM imports").fetchone()[0]
+        n_hear = dst.execute("SELECT COUNT(*) FROM hears").fetchone()[0]
+        lo, hi = dst.execute("SELECT MIN(ts), MAX(COALESCE(last_ts, ts)) FROM hears").fetchone()
+        owners = [r[0] for r in dst.execute("SELECT DISTINCT owner_id FROM imports")]
+        dst.close()
+        ppl = people()
+        info = {
+            "harava": APP_VERSION, "schema": SCHEMA_VERSION, "created": datetime.now().isoformat(timespec="seconds"),
+            "made_by": (user or {}).get("username", "") or "this computer",
+            "contents": "my data only" if mine_only else "everyone's data",
+            "imports": n_imp, "hears": n_hear,
+            "first": datetime.fromtimestamp(lo / 1000).isoformat(timespec="minutes") if lo else None,
+            "last": datetime.fromtimestamp(hi / 1000).isoformat(timespec="minutes") if hi else None,
+            "owners": {str(o): owner_name(o, ppl) for o in owners},
+            "local_rules": os.path.exists(LOCAL_RULES),
+            "files": {f"{base}.db": "the Harava database (SQLite), schema 2: hears once per phone, import_rows links them to imports",
+                      "local_rules.json": "rules made in the Workbench (ids/local_rules.json), if any"},
+        }
+        zpath = os.path.join(SNAP_DIR, base + ".zip")
+        with zipfile.ZipFile(zpath + ".part", "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(tmp, f"{base}.db")
+            if os.path.exists(LOCAL_RULES):
+                z.write(LOCAL_RULES, "local_rules.json")
+            z.writestr("snapshot_info.json", json.dumps(info, ensure_ascii=False, indent=1))
+        os.replace(zpath + ".part", zpath)
+        try:
+            os.chmod(zpath, 0o600)
+        except OSError:
+            pass
+    finally:
+        for f in (tmp, tmp + "-journal"):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    for old in list_snapshots()[SNAP_KEEP:]:
+        try:
+            os.remove(os.path.join(SNAP_DIR, old["name"]))
+        except OSError:
+            pass
+    return base + ".zip", info
+
+
+def list_snapshots():
+    if not os.path.isdir(SNAP_DIR):
+        return []
+    out = []
+    for fn in os.listdir(SNAP_DIR):
+        if _SNAP_NAME.match(fn):
+            p = os.path.join(SNAP_DIR, fn)
+            info = {}
+            try:
+                with zipfile.ZipFile(p) as z:
+                    info = json.loads(z.read("snapshot_info.json"))
+            except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+                pass
+            out.append({"name": fn, "size": os.path.getsize(p), "created": info.get("created", ""),
+                        "made_by": info.get("made_by", ""), "contents": info.get("contents", ""),
+                        "imports": info.get("imports"), "hears": info.get("hears"),
+                        "first": info.get("first"), "last": info.get("last")})
+    return sorted(out, key=lambda x: x["name"], reverse=True)
+
+
+@app.route("/api/snapshots")
+@needs("admin")
+def api_snapshots():
+    return jsonify({"snapshots": list_snapshots(), "keep": SNAP_KEEP})
+
+
+@app.route("/api/snapshots", methods=["POST"])
+@needs("admin")
+def api_snapshots_make():
+    mine = bool((request.get_json(silent=True) or {}).get("mine"))
+    u = current_user()
+    try:
+        with _db_lock:
+            name, info = make_snapshot(u, mine)
+    except (OSError, sqlite3.Error) as e:
+        return jsonify({"error": f"snapshot failed: {e}"}), 500
+    auth_log(f"database snapshot {name} ({info['contents']}, {info['imports']} imports)",
+             u.get("username", ""), request.remote_addr or "")
+    return jsonify({"ok": True, "name": name, "info": info})
+
+
+@app.route("/api/snapshots/<name>")
+@needs("admin")
+def api_snapshot_get(name):
+    if not _SNAP_NAME.match(name) or not os.path.exists(os.path.join(SNAP_DIR, name)):
+        abort(404)
+    auth_log(f"downloaded {name}", current_user().get("username", ""), request.remote_addr or "")
+    return send_from_directory(SNAP_DIR, name, as_attachment=True, mimetype="application/zip")
+
+
+@app.route("/api/snapshots/<name>", methods=["DELETE"])
+@needs("admin")
+def api_snapshot_delete(name):
+    if not _SNAP_NAME.match(name):
+        abort(404)
+    try:
+        os.remove(os.path.join(SNAP_DIR, name))
+    except OSError:
+        return jsonify({"error": "no such snapshot"}), 404
+    auth_log(f"deleted {name}", current_user().get("username", ""), request.remote_addr or "")
+    return jsonify({"ok": True})
 
 
 # ─────────────── data: whose data, phones, imports ───────────────
