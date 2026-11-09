@@ -41,7 +41,8 @@
         <div class="nav-item" data-view="phones" onclick="showView('phones')">📵 <span>Phone check</span></div>
         <div class="nav-item" data-view="ids" onclick="showView('ids')">🔎 <span>Identification</span></div>
         <div class="nav-item" data-view="imports" onclick="showView('imports')">📥 <span>Imports</span><span class="cnt" id="navImpCnt"></span></div>
-        {% if user.role == 'admin' %}<a class="nav-item" href="/maintenance" style="text-decoration:none;color:inherit">⚙️ <span>Maintenance</span></a>{% endif %}
+        {% if user.role == 'admin' %}<a class="nav-item" href="/workbench" style="text-decoration:none;color:inherit">🔬 <span>Workbench</span></a>
+        <a class="nav-item" href="/maintenance" style="text-decoration:none;color:inherit">⚙️ <span>Maintenance</span></a>{% endif %}
     </div>
 
     <div class="sb-section">
@@ -267,6 +268,7 @@
     </div>
 </div>
 <script>window.FWA = { role: {{ user.role|tojson }}, appName: {{ app_name|tojson }}, version: {{ version|tojson }}, travelMin: {{ travel_min_m }}, cartoApiKey: {{ carto_api_key|tojson }} };</script>
+<script src="{{ url_for('static', filename='common.js', v=version) }}"></script>
 <script src="{{ url_for('static', filename='app.js', v=version) }}"></script>
 <script src="{{ url_for('static', filename='info.js', v=version) }}"></script>
 <script src="{{ url_for('static', filename='privacy.js', v=version) }}"></script>

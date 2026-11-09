@@ -19,7 +19,9 @@ It runs on your own computer (open, no sign-in) or on a server behind nginx with
 - [Users and permissions](#users-and-permissions)
 - [Updating on a server](#updating-on-a-server)
 - [Pages](#pages)
+- [Phone app](#phone-app)
 - [Identification database](#identification-database)
+- [Workbench (admins)](#workbench-admins)
 - [Log and Sit: collect with both](#log-and-sit-collect-with-both)
 - [My devices](#my-devices)
 - [Phone check (classroom)](#phone-check-classroom)
@@ -44,6 +46,8 @@ It runs on your own computer (open, no sign-in) or on a server behind nginx with
 - **Harava's own identification database** — the Bluetooth SIG numbers and its own rules name radios Fieldwatch leaves *Unidentified* (97 % of them in the author's data), and join the changing addresses of one device into one row.
 - **My devices** — hide your own router, PC, phone and sensors from the analysis.
 - **Phone check** — is every phone in the box next to the teacher's phone?
+- **Phone app** at **/app** — the same data in the style of the WSPR Logger phone app, with uploads from the phone; add it to the home screen.
+- **Workbench** (admins) — every radio Harava cannot name yet, grouped by what it advertises, with the advertisement decoded, hints, a status and note per kind, and rules made and tested on the spot.
 - **Users and permissions** (on a server) — sign-in, *View only*, *Analyze* and *Admin*, a **/maintenance** page for users and a sign-in log.
 - **Mask addresses** for screenshots and presentations.
 - **What's new, User guides and About** in one window, as in WSPR Logger.
@@ -168,6 +172,7 @@ It asks for a username, first and last name and a password (at least 12 characte
 ```bash
 sudo cp deploy/harava.service /etc/systemd/system/harava.service
 # if your user is not "ubuntu" or the folder is not /home/ubuntu/harava:  sudo nano /etc/systemd/system/harava.service
+# the unit sets TZ=Europe/Helsinki, so days and times follow Finnish time; change it to your own zone
 sudo systemctl daemon-reload
 sudo systemctl enable --now harava
 systemctl status harava --no-pager
@@ -210,7 +215,7 @@ Open `https://harava.oh2gax.org`, sign in with the admin of step 6, add users on
 
 ### Backups and removing
 
-- The data that matters on the server: `harava.db` (imports, My devices), `harava_users.db` (users), `config.ini`, `api_keys.py` and `.harava_secret` (the key that signs the sign-in cookies). `update.sh` copies both databases to `~/harava_backups/` before every update; copy them off the server now and then (`scp`).
+- The data that matters on the server: `harava.db` (imports, My devices, Workbench notes), `harava_users.db` (users), `ids/local_rules.json` (rules made in the Workbench), `config.ini`, `api_keys.py` and `.harava_secret` (the key that signs the sign-in cookies). `update.sh` copies both databases and the local rules to `~/harava_backups/` before every update; copy them off the server now and then (`scp`).
 - To remove Harava completely: `sudo systemctl disable --now harava`, `sudo rm /etc/systemd/system/harava.service /etc/nginx/sites-enabled/harava.oh2gax.org /etc/nginx/sites-available/harava.oh2gax.org`, `sudo nginx -t && sudo systemctl reload nginx`, `sudo certbot delete --cert-name harava.oh2gax.org`, and delete `~/harava`.
 
 ### Troubleshooting
@@ -222,6 +227,8 @@ Open `https://harava.oh2gax.org`, sign in with the admin of step 6, add users on
 | *Too many failed sign-ins* | Five wrong passwords from one address lock it for 15 minutes (30 from all addresses lock everyone). Wait, or `sudo systemctl restart harava`. |
 | Forgotten admin password | `cd ~/harava && venv/bin/python harava.py --add-admin` with the same username sets a new password. |
 | The sign-in log shows `127.0.0.1` for everyone | `behind_proxy = true` is missing from `config.ini`. |
+| `nginx -t` warns *protocol options redefined for 0.0.0.0:443* (or `[::]:443`) after certbot | Another site on the server writes its `listen 443` line differently (for example with `http2`). Make Harava's lines match the other sites': e.g. `listen [::]:443 ssl http2;` and `listen 443 ssl;` as certbot wrote them, then `sudo nginx -t && sudo systemctl reload nginx`. The warning itself is harmless. |
+| Day boundaries or times are one or two hours off | The server runs in UTC. `deploy/harava.service` sets `Environment=TZ=Europe/Helsinki`; after changing the unit: `sudo cp deploy/harava.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart harava`. |
 
 ---
 
@@ -279,6 +286,7 @@ It shows the new commits and changed files and asks `Update to <hash>? [y/N]`. A
 | **Phone check** | The classroom phone-box check (below). |
 | **🔎 Identification** | How much Harava's own database identifies, which rules matched, and the most common advertisements that are still unknown. |
 | **Imports** | Drop files, or press **Scan folder** to read every new `.csv` / `.jsonl` / `.kml` in `data/` (sub-folders included). Each file can be switched off or deleted. |
+| **🔬 Workbench** | Radios Harava cannot name yet, a status and note for each kind, and rules made on the spot (admins only; `/workbench`). |
 | **⚙️ Maintenance** | Users, permissions and the sign-in log (admins only; a separate page at `/maintenance`). |
 
 Sidebar filters: day and time window; Wi-Fi or Bluetooth; minimum RSSI; *Identified as* (one kind of identified device, grouped by layer); *Travelled with me* (the same address ≥ 500 m apart, in two or more places); *Named or identified only*; *Heard only in Sit*; *Group same device*; *Hide my devices*.
@@ -296,6 +304,23 @@ Every device class in Fieldwatch's signature catalogue is its own map layer, wit
 
 **Glasses & VR** share one layer, because Meta uses the same Bluetooth ID for its Ray-Ban glasses and its Quest headsets; a name such as *Quest*, *Oculus*, *Pico*, *Vive* or *Vision Pro* adds a **VR?** tag. For trackers Harava reads from the raw data whether the tag is **separated** from its owner or **near owner**; for Ruuvi tags it decodes temperature, humidity, pressure and battery.
 
+## Phone app
+
+**`/app`** (for example `https://harava.oh2gax.org/app`) is Harava for the phone, in the style of the WSPR Logger phone app: a slim top bar (☰ menu, the view and the day, the local time, the theme button and a dot for how new the data is), one view at a time on the whole screen, and every choice in the ☰ menu — the day, the views as tiles, and each view's options in a folding section.
+
+| View | What it shows |
+|------|---------------|
+| **Map** | the phone's path and one pin per radio; tap a pin for a card, tap the card for the radio's own page |
+| **Day** | counts, hears per 10 min, the device layers and the most common identifications (tap one to list it) |
+| **Watch list** | glasses & VR, trackers (separated first), surveillance, police, drones, hacking tools |
+| **Devices** | every radio with search and sorting; tap one for its page: details, signal over time, where it was heard, ＋ My device |
+| **Phone check** | the classroom phone box, with *Auto-calibrate* |
+| **Identification** | Harava's database for the chosen day |
+| **Imports** | upload Fieldwatch exports straight from the phone; switch or delete imports |
+| **Workbench** | admins only: the unknown radios, their status and notes, and rules |
+
+It uses the same sign-in, permissions and data as the full site, and *Mask addresses* (in ☰ → General) works there too. Add it to the home screen (Chrome: ⋮ → *Add to Home screen*; Safari: Share → *Add to Home Screen*) and it opens without the browser bars. Back on the phone closes the menu or a window, or goes to the previous view. When the server gets a new version, or after an hour in the background, the app reloads itself. The Harava Mobile app User Guide (*User guides*) has the details.
+
 ## Identification database
 
 Fieldwatch's signatures name only part of what it hears; in the author's log of 8 November 2026 it left 1,782 of 2,377 Bluetooth radios *Unidentified*, and Harava names 1,725 of them (97 %; 99 % of those with advertising data). The database is in `ids/`:
@@ -310,6 +335,16 @@ It recognises among others: Bluetooth Mesh devices (not set up / set up), EV cha
 - **Identified as** and **Company / vendor** are columns on the Devices page and rows in the Selected radio panel; a grey name with **?** is a weak guess. A radio Fieldwatch left *Unidentified* moves to the layer the rule gives.
 - **Group same device.** Many devices change their Bluetooth address every few minutes. When the data proves that addresses belong to one device — the same Bluetooth Mesh device UUID, or the same custom service UUID *and* the same name — Harava joins them; with *Group same device* on, a group is one row with an **N addr.** tag. A shared custom UUID alone is not proof (Ruuvi tags, Windows PCs and Galaxy Buds each share one).
 - The **🔎 Identification** page lists every rule with its hits and the most common unknown advertisements — the place to look for the next rule. Edit `ids/harava_ids.json` and press **Reload database** (Analyze permission); no restart is needed.
+
+## Workbench (admins)
+
+**🔬 Workbench** (`/workbench`, and a view in the phone app) is where unknown radios become rules. Every Bluetooth radio of all active imports is put in a bucket by what it advertises, leaving out its address and the bytes that change: the company and the first byte of its manufacturer data (Apple's and Microsoft's message types are named), service data, a vendor's own 128-bit UUID, other services and AD types; the shape of its name only when nothing else tells (`NEXO&D]NZ08286152` → `NEXO&D]#`). One row is one kind of device to find out.
+
+- Three tabs: **Unknown** (advertising data but no rule), **Weakly identified** (only the company, only a custom UUID, or a low-confidence rule) and **No data** (flags only — the rest is in a scan response that Fieldwatch does not log).
+- A row opens the advertisement **decoded** structure by structure, its **variants** and the **bytes that change** between radios (counters, rotating ids), **hints** (SIG company and UUID names, *travelled with you*, *heard on many days at one place*, *many addresses but few devices*), **search links** (web, GitHub code, SIG numbers), what was **heard together with** it, and its radios with days.
+- Each kind gets a **status** — New, Investigating, Identified, Ignore, Can't identify — and a **note** (table `wb_notes` in `harava.db`).
+- **Make a rule**: Harava suggests a match from what the radios share; **Preview** counts what it would catch (and which identified radios it would take over), **Save rule** starts using it at once. Rules made here go to **`ids/local_rules.json`** on that server only — not in git, kept by `update.sh` backups — with ids starting `local-`, and they are tried before `harava_ids.json`. The Workbench lists them and can remove them.
+- **Export rules and notes** downloads both as JSON, so good rules can be added to the shared `ids/harava_ids.json` in a later version.
 
 ## Log and Sit: collect with both
 
@@ -383,12 +418,18 @@ templates/index.html      the page
 templates/login.html      sign-in
 templates/account.html    my account (change password)
 templates/maintenance.html  users, permissions and the sign-in log (admins)
+templates/workbench.html  the Workbench (admins)
+templates/app.html        the phone app (/app)
 static/app.js, app.css    front end
+static/common.js          helpers shared by the full page and the phone app
+static/m-app.js, m-app.css  the phone app
+static/icons/             phone app and home-screen icons
 static/info.js            the What's new / User guides / About window
 static/privacy.js         Mask addresses
 static/admin.css          sign-in, account and maintenance pages
 static/vendor/            Leaflet 1.9.4 (BSD-2-Clause) and Chart.js 4.4.0 (MIT)
 ids/                      identification database: harava_ids.json, bt_assigned_numbers.json
+                          (+ local_rules.json: Workbench rules on a server, not in git)
 tools/update_bt_numbers.py  downloads the newest Bluetooth SIG lists into ids/
 signature_classes.json    Fieldwatch signature name -> class (from the Fieldwatch repository, MIT)
 doc/                      guides (PDF), whats_new.md, guides.json, src/ (LaTeX + screenshots)
@@ -401,7 +442,7 @@ api_keys.py.example       CARTO key template       (api_keys.py: local, not in g
 CHANGELOG.md              technical history
 ```
 
-Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data), `harava_users.db` (users), `.harava_secret` (cookie key), `data/` (your Fieldwatch exports) and `tmp_files/`.
+Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data), `harava_users.db` (users), `.harava_secret` (cookie key), `ids/local_rules.json` (Workbench rules), `data/` (your Fieldwatch exports) and `tmp_files/`.
 
 ## REST API
 
@@ -416,6 +457,10 @@ All routes need a sign-in once users exist (otherwise `401`), and the routes tha
 | POST, DELETE | `/api/own`, `/api/own/<id>` | Analyze | My devices rules |
 | POST | `/api/ids/reload` | Analyze | read the identification files again |
 | GET, POST, PUT, DELETE | `/api/users`, `/api/users/<id>`, `/api/users/<id>/password` | Admin | users |
+| GET | `/api/wb?tab=unknown\|weak\|nodata`, `/api/wb/fp?fp=`, `/api/wb/rules`, `/api/wb/export` | Admin | Workbench: kinds of unknown radios, one kind in detail, local rules, export |
+| POST, DELETE | `/api/wb/note`, `/api/wb/preview`, `/api/wb/rule`, `/api/wb/rule/<id>` | Admin | Workbench: status and note, test a match, save or remove a local rule |
+| GET | `/api/app/build` | View only | the phone app's build stamp (it reloads when this changes) |
+| GET | `/app/manifest.webmanifest` | none | the phone app's manifest for *Add to Home Screen* |
 | POST | `/api/account/password` | signed in | change your own password |
 | GET | `/healthz` | none | `ok` — for `update.sh` and monitoring |
 

@@ -64,7 +64,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad Admin and server guide, version 1.0 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad Admin and server guide, version 1.1 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava on a Server}\par\vspace{5pt}
 {\large\bfseries Installing Harava next to other sites with nginx and Let's Encrypt,\\ users and permissions, updating, backups and troubleshooting}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -78,6 +78,7 @@
 \item Section~\ref{sec:install}: the installation, step by step, with every command;
 \item Section~\ref{sec:users}: users, permissions and the Maintenance page;
 \item Section~\ref{sec:update}: updating with \texttt{update.sh}, the same way as WSPR Logger;
+\item Section~\ref{sec:workbench}: the Workbench, where unknown radios become rules on the server;
 \item Sections~\ref{sec:backup}--\ref{sec:quick}: backups, security, troubleshooting and a quick reference.
 \end{itemize}}
 
@@ -204,7 +205,7 @@ systemctl status harava --no-pager
 curl -s http://127.0.0.1:5057/healthz        # ok
 curl -sI http://127.0.0.1:5057/ | head -3    # 302, Location: /login
 \end{cmd}
-The unit runs \texttt{venv/bin/python harava.py --no-browser} as \texttt{ubuntu} in \texttt{/home/ubuntu/harava}, restarts it if it stops, and starts it after a reboot. If your user or folder differs, edit the copy with \nolinkurl{sudo nano /etc/systemd/system/harava.service} before \texttt{daemon-reload}. The log: \texttt{journalctl -u harava -f}.
+The unit runs \texttt{venv/bin/python harava.py --no-browser} as \texttt{ubuntu} in \texttt{/home/ubuntu/harava}, restarts it if it stops, and starts it after a reboot. It also sets \texttt{TZ=Europe/Helsinki}: the server itself runs in UTC, and without it the days would change at 2 or 3 a.m.\ Finnish time; change the zone in the unit if yours is different. If your user or folder differs, edit the copy with \nolinkurl{sudo nano /etc/systemd/system/harava.service} before \texttt{daemon-reload}. The log: \texttt{journalctl -u harava -f}.
 
 \subsection{nginx --- this site only}\label{sec:nginx}
 \begin{cmd}
@@ -299,14 +300,28 @@ SERVICE=name bash update.sh & for a service with another name\\
 \lead{Your local files are safe.} \texttt{config.ini}, \texttt{api\_keys.py}, the two databases, \texttt{.harava\_secret} and \texttt{data/} are not in git, and the script never runs \texttt{git reset}, \texttt{stash} or \texttt{checkout}. If GitHub changes a file that has also been edited on the server, it stops without changing anything and tells what to do. It also warns when \texttt{api\_keys.py} is missing, when \texttt{require\_login} is not \texttt{true}, or when there are no users. Run it as \texttt{bash update.sh}; do not \texttt{chmod +x} it (git would see the changed mode as a local edit).
 
 % ─────────────────────────────────────────────────────────────────────
+\section{The Workbench}\label{sec:workbench}
+\lead{What it is.} \ui{Workbench} in the menu (\texttt{/workbench}, admins only; also a view in the phone app at \texttt{/app}) lists every Bluetooth radio of all active imports that Harava cannot name yet. Radios are put in buckets by \emph{what they advertise}, without their address and the bytes that change: the company and the first byte of the manufacturer data, service data, a vendor's own 128-bit UUID, other services and AD types --- and the shape of the name only when nothing else tells. One row is one kind of device. Three tabs: \emph{Unknown} (advertising data, no rule), \emph{Weakly identified} (company only, custom UUID only, or a low-confidence rule) and \emph{No data} (flags only).
+
+\fig{a_workbench.jpg}{0.98}{The Workbench: progress per day at the top, the kinds on the left, one kind on the right with its status and note, the advertisement decoded, the variants and the bytes that change, hints and search links.}
+
+\lead{Notes.} Every kind can have a status --- New, Investigating, Identified, Ignore, Can't identify --- and a note. They are stored in the table \texttt{wb\_notes} in \texttt{harava.db} and are shared by all admins; the fingerprint stays the same when rules change, so a note stays with its kind.
+
+\lead{Rules.} \ui{Make a rule} is filled with a match that all the radios of the kind share. \ui{Preview} counts what it would catch on all days, and which already identified radios it would take over; \ui{Save rule} checks it (hex fields, UUID lists, a regular expression that compiles, a known layer, at least one condition), gives it an id starting with \texttt{local-}, and starts using it at once --- no restart.
+
+\fig{a_wb_rule.jpg}{0.98}{Making a rule: name, layer, confidence and the suggested match, with the preview of what it would catch.}
+
+\infobox{Where local rules live.}{In \texttt{\textasciitilde/harava/ids/local\_rules.json}, on this server only. The file is in \texttt{.gitignore}, so \texttt{update.sh} never touches it, and it copies it with the databases before every update. Local rules are tried \emph{before} the shared \texttt{ids/harava\_ids.json}. The \ui{Local rules} table at the bottom of the Workbench lists them and removes them; \ui{Export rules and notes} downloads the rules and the notes as one JSON file, so good rules can be added to the shared database in a later version of Harava.}
+
+% ─────────────────────────────────────────────────────────────────────
 \section{Backups, moving and removing}\label{sec:backup}
-\lead{What to keep.} \texttt{harava.db}, \texttt{harava\_users.db}, \texttt{config.ini}, \texttt{api\_keys.py} and \texttt{.harava\_secret}. \texttt{update.sh} copies the databases before every update; copy them off the server now and then, for example from your own computer:
+\lead{What to keep.} \texttt{harava.db} (also the Workbench notes), \texttt{harava\_users.db}, \texttt{ids/local\_rules.json} (the Workbench's rules), \texttt{config.ini}, \texttt{api\_keys.py} and \texttt{.harava\_secret}. \texttt{update.sh} copies the databases and the local rules before every update; copy them off the server now and then, for example from your own computer:
 \begin{cmd}
 scp ubuntu@harava.oh2gax.org:harava_backups/pre_update_*/harava*.db .
 \end{cmd}
 A consistent copy while Harava runs: \texttt{sqlite3 harava.db ".backup harava\_copy.db"} (or the copies \texttt{update.sh} makes).
 
-\lead{Moving to another server.} Install as in Section~\ref{sec:install}, but before step~\ref{sec:firstadmin} copy the five files above into \texttt{\textasciitilde/harava}; the users and the data come with them.
+\lead{Moving to another server.} Install as in Section~\ref{sec:install}, but before step~\ref{sec:firstadmin} copy the six files above into \texttt{\textasciitilde/harava}; the users and the data come with them.
 
 \lead{Removing Harava completely.}
 \begin{cmd}
@@ -346,6 +361,8 @@ Forgotten admin password & \texttt{venv/bin/python harava.py --add-admin} with t
 The sign-in log shows \texttt{127.0.0.1} for everyone & \texttt{behind\_proxy = true} is missing from \texttt{config.ini}.\\
 Signed out after every click & The site is opened over \texttt{http} while \texttt{behind\_proxy = true}: open \texttt{https://}, or let certbot add the redirect.\\
 The map has an ``API key required'' watermark & \texttt{api\_keys.py} is missing or has no key.\\
+\texttt{nginx -t} warns \emph{protocol options redefined for 0.0.0.0:443} (or \texttt{[::]:443}) after certbot & Another site writes its \texttt{listen 443} line differently, e.g.\ with \texttt{http2}. Make Harava's lines match the other sites' (for example \texttt{listen [::]:443 ssl http2;} and \texttt{listen 443 ssl;}), then \texttt{sudo nginx -t \&\& sudo systemctl reload nginx}. The warning itself is harmless.\\
+Days or times are 2--3 hours off & The server runs in UTC: the unit needs \texttt{Environment=TZ=Europe/Helsinki}. Copy the unit again, \texttt{sudo systemctl daemon-reload}, \texttt{sudo systemctl restart harava}.\\
 \texttt{update.sh}: \emph{GitHub changes file(s) that are also modified on this machine} & A file from git was edited on the server: copy it aside, \texttt{git checkout -- <file>}, run \texttt{update.sh} again.\\
 \bottomrule
 \end{tabularx}

@@ -17,13 +17,17 @@
         on = localStorage.getItem(KEY) === '1';
     } catch (e) {}
 
+    // a name of only digits and signs ("1", "42") says nothing about anyone, and masking it would also
+    // change every count on the page that happens to be the same number
+    const maskable = n => n.length >= 2 && !/^[\d\s.,:;%+\-−–#()]+$/.test(n);
+
     // which names to hide: built from the radios the page has loaded
     function buildNames() {
         names = new Map();
         const devs = (window.S && window.S.devices) || [];
         let w = 0, pc = 0;
         const seen = new Set();
-        const wifi = n => { if (n && !seen.has(n)) { seen.add(n); names.set(n, `Wi-Fi network ${++w}`); } };
+        const wifi = n => { if (n && maskable(n) && !seen.has(n)) { seen.add(n); names.set(n, `Wi-Fi network ${++w}`); } };
         // every Wi-Fi name, your own included: your own network name with its address is what points to a home
         for (const d of devs) if (d.kind === 'WIFI') wifi((d.name || '').trim());
         for (const r of (window.S && window.S.own) || []) {
@@ -34,7 +38,7 @@
         }
         for (const d of devs) {
             const n = (d.name || '').trim();
-            if (!n || d.own || seen.has(n) || d.kind === 'WIFI') continue;
+            if (!n || !maskable(n) || d.own || seen.has(n) || d.kind === 'WIFI') continue;
             const m = n.match(POSSESSIVE);
             if (m) { seen.add(n); names.set(n, `•••${m[2]}${m[3]}`); continue; }
             if (/^(DESKTOP|LAPTOP)-[A-Z0-9]{5,}$/i.test(n) || d.ident === 'Windows PC' || d.ident === 'Windows device') {

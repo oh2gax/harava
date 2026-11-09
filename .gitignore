@@ -13,6 +13,8 @@ tmp_files/
 harava.db
 harava.db-*
 harava_users.db
+ids/local_rules.json
+ids/local_rules.json.tmp
 harava_users.db-*
 *.db.bak
 fieldwatch.db

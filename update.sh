@@ -12,10 +12,10 @@
 # Safe by design (same rules as WSPR Logger's update.sh)
 #   * only fast-forwards (git merge --ff-only); never resets, stashes or discards
 #   * local files stay as they are: config.ini, api_keys.py, harava.db, harava_users.db,
-#     .harava_secret and data/ are not in git
+#     .harava_secret, ids/local_rules.json and data/ are not in git
 #   * if GitHub changed a file that is also modified here, it stops and tells you
 #   * new .py files, templates and JSON files are checked BEFORE anything is changed
-#   * harava.db and harava_users.db are copied to <folder>_backups/ before every update
+#   * harava.db, harava_users.db and ids/local_rules.json are copied to <folder>_backups/ before every update
 #   * only the harava service is restarted; nginx and the other services are not touched
 #
 # Environment overrides:   SERVICE=harava   VERIFY_SECONDS=40
@@ -106,6 +106,10 @@ src.close()
 PY
     n=$((n + 1))
   done
+  # the Workbench's local rules (not in git) are kept the same way
+  if [ -s "$APP_DIR/ids/local_rules.json" ]; then
+    cp -p -- "$APP_DIR/ids/local_rules.json" "$BACKUP_DIR/local_rules.json" && n=$((n + 1))
+  fi
   if [ "$n" -eq 0 ]; then
     rmdir "$BACKUP_DIR" 2>/dev/null
     BACKUP_DIR=""

@@ -36,6 +36,7 @@ import secrets
 from datetime import timedelta
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
+from urllib.parse import quote_plus
 from datetime import datetime, timezone
 
 from flask import Flask, Response, abort, g, jsonify, redirect, render_template, request, send_from_directory, session
@@ -307,6 +308,14 @@ CREATE TABLE IF NOT EXISTS own_devices (
     match    TEXT NOT NULL,        -- mac | mac_prefix | name | name_contains
     value    TEXT NOT NULL,
     created  TEXT
+);
+-- Workbench (admins): what has been found out about one kind of unknown advertisement (a fingerprint)
+CREATE TABLE IF NOT EXISTS wb_notes (
+    fp       TEXT PRIMARY KEY,
+    status   TEXT DEFAULT 'new',   -- new | investigating | identified | ignore | cannot
+    note     TEXT DEFAULT '',
+    updated  TEXT,
+    by_user  TEXT
 );
 """
 
@@ -787,9 +796,12 @@ IDS_DIR = os.path.join(HERE, "ids")
 BT = {"companies": {}, "uuids": {}, "ad_types": {}}
 HV = {"rules": []}
 HV_RULES = []
+_WB_CACHE = {}
 
 
 NAME_RULE_IDS = set()     # rules that need a name; used when a nameless address takes its group's name
+LOCAL_RULES = os.path.join(IDS_DIR, "local_rules.json")
+LOCAL = {"rules": []}
 
 
 def load_ids():
@@ -809,8 +821,19 @@ def load_ids():
         else:
             HV = data
         status[fn] = "ok"
+    # ids/local_rules.json: rules made on this server in the Workbench (not in git). They come first,
+    # so a local rule wins over the shared database while it is being tried out.
+    LOCAL["rules"] = []
+    try:
+        with open(LOCAL_RULES, encoding="utf-8") as fh:
+            LOCAL["rules"] = [dict(r, local=True) for r in json.load(fh).get("rules", [])]
+        status["local_rules.json"] = f"ok, {len(LOCAL['rules'])} rule(s)"
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as e:
+        status["local_rules.json"] = f"not loaded: {e}"
     rules = []
-    for r in HV.get("rules", []):
+    for r in LOCAL["rules"] + HV.get("rules", []):
         m = dict(r.get("match", {}))
         if m.get("name_regex"):
             try:
@@ -830,6 +853,7 @@ def load_ids():
             m["uuid128_any"] = {u.upper() for u in m["uuid128_any"]}
         rules.append({**r, "_m": m})
     HV_RULES = rules
+    _WB_CACHE.clear()
     NAME_RULE_IDS.clear()
     NAME_RULE_IDS.update(r["id"] for r in rules if r["_m"].get("name_regex"))
     return status
@@ -1203,7 +1227,7 @@ USERS_DB = os.path.join(HERE, "harava_users.db")
 SECRET_FILE = os.path.join(HERE, ".harava_secret")
 ROLES = {"view": "View only", "analyze": "Analyze", "admin": "Admin"}
 ROLE_RANK = {"view": 1, "analyze": 2, "admin": 3}
-OPEN_ENDPOINTS = {"login", "logout", "static", "healthz"}
+OPEN_ENDPOINTS = {"login", "logout", "static", "healthz", "app_manifest"}
 PW_MIN = 12
 _fails = defaultdict(list)                                   # ip -> times of failed sign-ins
 _fails_lock = threading.Lock()
@@ -1649,6 +1673,54 @@ def index():
                            carto_api_key=CARTO_API_KEY, user=current_user())
 
 
+# ───────────────────────── the phone app /app ─────────────────────────
+# The user interface of the WSPR Logger phone view: one view at a time, every choice in the ☰ menu
+# (templates/app.html, static/m-app.js, static/m-app.css). The same data and permissions as the page.
+def _app_build():
+    """The build of the phone app: the newest change of its templates and static files. After a deploy
+    a phone that has the app open sees a new build and reloads itself (m-app.js)."""
+    newest = 0
+    for base in (os.path.join(HERE, "templates"), os.path.join(HERE, "static")):
+        for root, dirs, files in os.walk(base):
+            dirs[:] = [x for x in dirs if x != "vendor"]
+            for f in files:
+                try:
+                    newest = max(newest, int(os.path.getmtime(os.path.join(root, f))))
+                except OSError:
+                    pass
+    return str(newest)
+
+
+@app.route("/app")
+def app_page():
+    return render_template("app.html", app_name=APP_NAME, version=APP_VERSION, build=_app_build(),
+                           user=current_user(), carto_api_key=CARTO_API_KEY,
+                           travel_min_m=int(CFG["travel_min_m"]), layers=LAYERS)
+
+
+@app.route("/api/app/build")
+def api_app_build():
+    resp = jsonify({"build": _app_build()})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/app/manifest.webmanifest")
+def app_manifest():
+    """Web-app manifest for "Add to Home Screen": opens /app full screen (no sign-in needed to read it)."""
+    man = {
+        "name": APP_NAME, "short_name": APP_NAME,
+        "description": "What your phone heard with Fieldwatch: map, devices, watch list, phone check",
+        "start_url": "/app", "scope": "/app", "display": "standalone", "orientation": "any",
+        "background_color": "#111827", "theme_color": "#111827",
+        "icons": [
+            {"src": "/static/icons/app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/static/icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+        ],
+    }
+    return Response(json.dumps(man), mimetype="application/manifest+json")
+
+
 @app.route("/api/summary")
 def api_summary():
     with db() as con:
@@ -1881,7 +1953,8 @@ def api_ids():
             groups[d["ident_id"]].add(d["group"])
     rules = [{"id": r["id"], "name": r["name"], "layer": r.get("layer", ""), "confidence": r.get("confidence", ""),
               "note": r.get("note", ""), "match": {k: v for k, v in r.get("match", {}).items()},
-              "hits": hits.get(r["id"], 0), "devices": len(groups.get(r["id"], ())) or None}
+              "hits": hits.get(r["id"], 0), "devices": len(groups.get(r["id"], ())) or None,
+              "local": bool(r.get("local"))}
              for r in HV_RULES]
     pats = defaultdict(list)
     for d in still:
@@ -1892,7 +1965,8 @@ def api_ids():
     return jsonify({
         "bt": {"source": BT.get("source", ""), "fetched": BT.get("fetched", ""),
                "companies": len(BT["companies"]), "uuids": len(BT["uuids"]), "ad_types": len(BT["ad_types"])},
-        "db": {"name": HV.get("name", ""), "version": HV.get("version", ""), "rules": len(HV_RULES)},
+        "db": {"name": HV.get("name", ""), "version": HV.get("version", ""), "rules": len(HV_RULES),
+               "local": len(LOCAL["rules"])},
         "counts": {"ble": len(ble), "fieldwatch_left": len(fw_left), "harava_identified": len(fw_left) - len(still),
                    "still_unidentified": len(still), "company_only": hits.get("company", 0),
                    "grouped_addresses": sum(1 for d in devs if d["group"] and d.get("group_size", 1) > 1),
@@ -1905,6 +1979,499 @@ def api_ids():
 @needs("analyze")
 def api_ids_reload():
     return jsonify({"status": load_ids(), "rules": len(HV_RULES)})
+
+
+# ─────────────── workbench (admins): radios Harava cannot name yet ───────────────
+# Every BLE address heard on any day is put in a bucket by what it advertises, without its address or
+# changing bytes (a fingerprint): the manufacturer and the first byte of its data, the service data UUID,
+# a vendor's own 128-bit UUID, the AD types; a name's shape only when nothing else tells. One bucket is
+# one kind of device to find out. The admin keeps a status and a note per bucket (wb_notes) and can turn
+# one into a rule: rules made here go to ids/local_rules.json on this server only (not in git).
+
+WB_STATUS = ("new", "investigating", "identified", "ignore", "cannot")
+WB_TABS = ("unknown", "weak", "nodata")
+AD_SHORT = {"02": "16-bit services", "03": "16-bit services", "06": "128-bit services", "07": "128-bit services",
+            "08": "short name", "09": "name", "0A": "Tx power", "16": "service data", "21": "128-bit service data",
+            "2B": "Mesh beacon", "2A": "Mesh message", "29": "Mesh provisioning", "FF": "manufacturer data",
+            "19": "appearance", "1B": "LE address", "24": "URI"}
+# The first byte of Apple's and Microsoft's manufacturer data says what kind of message it is
+APPLE_TYPES = {"02": "iBeacon", "03": "AirPrint", "05": "AirDrop", "06": "HomeKit", "07": "Proximity pairing (AirPods, Beats)",
+               "08": "Hey Siri", "09": "AirPlay target", "0A": "AirPlay source", "0B": "Magic Switch (Watch)",
+               "0C": "Handoff", "0D": "Tethering target", "0E": "Tethering source", "0F": "Nearby action",
+               "10": "Nearby info (iPhone, iPad, Mac, Watch)", "12": "Find My (lost or separated device)",
+               "16": "Find My (Unknown Tracker alert)"}
+MS_TYPES = {"01": "CDP beacon (Windows PC, Xbox; Swift Pair when byte 2 is 03)", "03": "Swift Pair"}
+_NAME_RUN = re.compile(r"[0-9A-Za-z]*\d[0-9A-Za-z]*")
+GENERIC_AD = {"01", "08", "09", "0A", "12", "19", "1B", "1A", "0D", "0E", "0F", "14", "15", "1F"}
+WB_CONF = ("high", "medium", "low")
+
+
+def _name_shape(name):
+    """'DEV-1A2B3C' and 'DEV-9F8E7D' have the same shape 'DEV-#'."""
+    return _NAME_RUN.sub(lambda m: "#" if sum(c.isdigit() for c in m.group()) >= 3 else m.group(),
+                         name or "").strip()[:40]
+
+
+def _fingerprint(d):
+    """(fp, label, parts) of one BLE device: what kind of advertisement it is, without what changes."""
+    f = adv_features(d["mfg"], d["raw"], d["uuids"])
+    key, label = [], []
+    if f["mfg"]:
+        b0 = f["mfg_data"][:1].hex().upper()
+        comp = BT["companies"].get(f["mfg"], "unknown company")
+        key.append(f"mfg={f['mfg']}:{b0}")
+        kind = (APPLE_TYPES if f["mfg"] == "004C" else MS_TYPES if f["mfg"] == "0006" else {}).get(b0)
+        label.append(f"{comp} (0x{f['mfg']}) data {b0 or '—'}…" + (f" = {kind}" if kind else ""))
+    for u in sorted(f["sd"]):
+        key.append(f"sd={u}")
+        nm = BT["uuids"].get(u, {}).get("name")
+        label.append(f"service data {u}" + (f" ({nm})" if nm else ""))
+    custom = sorted(u for u in f["uuid128"] if not u.endswith("-0000-1000-8000-00805F9B34FB"))
+    for u in custom[:2]:
+        key.append(f"u128={u}")
+        label.append(f"custom service {u[:8]}…")
+    svc = sorted(f["svc"] - set(f["sd"]))
+    if svc and not f["mfg"]:
+        key.append("svc=" + ",".join(svc[:4]))
+        label.append("services " + ", ".join(
+            u + (f" ({BT['uuids'][u]['name']})" if u in BT["uuids"] else "") for u in svc[:3]))
+    ads = sorted({t for t, _ in f["ads"] if t not in ("01", "09", "08", "16", "FF", "02", "03", "06", "07", "21")})
+    if ads:
+        key.append("ad=" + ",".join(ads))
+        label.extend(AD_SHORT.get(t) or BT["ad_types"].get(t, f"AD {t}") for t in ads)
+    data = bool(key)
+    if not data or not (f["mfg"] or f["sd"] or custom):
+        shape = _name_shape(d["name"] or d.get("group_name", ""))
+        if shape:
+            key.append(f"name={shape}")
+            label.append(f"name '{shape}'")
+    if not key:
+        key, label = ["nodata"], ["flags only / no advertising data"]
+    fp = hashlib.sha1("|".join(key).encode()).hexdigest()[:12]
+    return fp, " + ".join(label), {"data": data, "f": f, "custom": custom}
+
+
+def _wb_tab(d, data):
+    if d["kind"] != "BLE":
+        return None
+    if d["ident_id"] in ("company", "custom-uuid") or (d["ident_id"] and d["ident_conf"] == "low"):
+        return "weak"
+    if d["category"] != "Unidentified" or d["ident_id"]:
+        return None
+    return "unknown" if data else "nodata"
+
+
+def _wb_state():
+    """Every BLE device of all days, with its fingerprint and the days and 5-min slots it was heard in.
+    Cached until the imports or the rules change."""
+    with db() as con:
+        ids = tuple(active_import_ids(con))
+        hears = query_hears(con)
+    ck = (ids, len(hears), len(HV_RULES))
+    if _WB_CACHE.get("key") == ck:
+        return _WB_CACHE["state"]
+    devs = build_devices(hears)
+    days, slots = defaultdict(set), defaultdict(set)
+    for h in hears:
+        if h["kind"] == "BLE" and h["ts"]:
+            k = h["mac"]
+            days[k].add(datetime.fromtimestamp(h["ts"] / 1000).strftime("%Y-%m-%d"))
+            slots[k].add(h["ts"] // 300000)
+    buckets = {}
+    for d in devs:
+        if d["kind"] != "BLE":
+            continue
+        fp, label, x = _fingerprint(d)
+        d["_fp"], d["_tab"] = fp, _wb_tab(d, x["data"])
+        d["_days"], d["_slots"] = days[d["mac"]], slots[d["mac"]]
+        b = buckets.setdefault(fp, {"fp": fp, "label": label, "devs": []})
+        b["devs"].append(d)
+    state = {"devs": [d for d in devs if d["kind"] == "BLE"], "buckets": buckets}
+    _WB_CACHE.update(key=ck, state=state)
+    return state
+
+
+def _wb_notes():
+    with db() as con:
+        return {r["fp"]: dict(r) for r in con.execute("SELECT * FROM wb_notes")}
+
+
+def _wb_item(b, tab, notes):
+    ds = [d for d in b["devs"] if d["_tab"] == tab] if tab else b["devs"]
+    names = Counter(d["name"] or d["group_name"] for d in ds if d["name"] or d["group_name"])
+    idents = Counter(d["ident"] for d in ds if d["ident"])
+    n = notes.get(b["fp"], {})
+    return {"fp": b["fp"], "label": b["label"], "count": len(ds),
+            "devices": len({d["group"] or d["mac"] for d in ds}),
+            "days": sorted(set().union(*(d["_days"] for d in ds))) if ds else [],
+            "names": [k for k, _ in names.most_common(6)],
+            "ident": idents.most_common(1)[0][0] if idents else "",
+            "rssi_max": max((d["rssi_max"] for d in ds if d["rssi_max"] is not None), default=None),
+            "hears": sum(d["hears"] for d in ds),
+            "travelled": sum(1 for d in ds if d["travelled"]),
+            "status": n.get("status", "new"), "note": n.get("note", ""), "updated": n.get("updated", "")}
+
+
+@app.route("/api/wb")
+@needs("admin")
+def api_wb():
+    tab = request.args.get("tab", "unknown")
+    if tab not in WB_TABS:
+        tab = "unknown"
+    st, notes = _wb_state(), _wb_notes()
+    items = [_wb_item(b, tab, notes) for b in st["buckets"].values() if any(d["_tab"] == tab for d in b["devs"])]
+    items.sort(key=lambda x: (x["status"] in ("ignore", "cannot", "identified"), -x["count"], -x["hears"]))
+    counts = {t: sum(1 for d in st["devs"] if d["_tab"] == t) for t in WB_TABS}
+    kinds = {t: sum(1 for b in st["buckets"].values() if any(d["_tab"] == t for d in b["devs"])) for t in WB_TABS}
+    per_day = defaultdict(Counter)
+    for d in st["devs"]:
+        for day in d["_days"]:
+            per_day[day]["ble"] += 1
+            if d["_tab"]:
+                per_day[day][d["_tab"]] += 1
+    progress = [{"day": k, "ble": v["ble"], **{t: v[t] for t in WB_TABS}} for k, v in sorted(per_day.items())]
+    done = Counter(n["status"] for n in notes.values())
+    return jsonify({"tab": tab, "items": items, "counts": counts, "kinds": kinds, "progress": progress,
+                    "statuses": dict(done), "local_rules": len(LOCAL["rules"])})
+
+
+def _decode(d, f):
+    out = []
+    if d["mfg"]:
+        out.append({"what": "Company ID", "value": f"0x{f['mfg']} {BT['companies'].get(f['mfg'], '(not in the SIG list)')}"})
+        out.append({"what": "Manufacturer data", "value": f["mfg_data"].hex().upper() or "—"})
+        b0 = f["mfg_data"][:1].hex().upper()
+        kind = (APPLE_TYPES if f["mfg"] == "004C" else MS_TYPES if f["mfg"] == "0006" else {}).get(b0)
+        if kind:
+            out.append({"what": "Message type", "value": f"{b0} = {kind}"})
+    for t, data in f["ads"]:
+        nm = AD_SHORT.get(t) or BT["ad_types"].get(t, "unknown")
+        val = data.hex().upper()
+        if t == "01":
+            nm, val = "flags", val + (" (LE general discoverable)" if val in ("02", "06", "1A", "1E") else "")
+        elif t in ("08", "09"):
+            val = data.decode("utf-8", "replace")
+        elif t == "16" and len(data) >= 2:
+            u = format(int.from_bytes(data[:2], "little"), "04X")
+            nm = f"service data {u}" + (f" ({BT['uuids'][u]['name']})" if u in BT["uuids"] else "")
+            val = data[2:].hex().upper() or "—"
+        elif t == "FF" and len(data) >= 2:
+            continue                                  # shown above as company + data
+        out.append({"what": f"AD {t} {nm}", "value": val})
+    for u in sorted(f["svc"] - set(f["sd"])):
+        out.append({"what": "Service UUID", "value": u + (f" {BT['uuids'][u]['name']}" if u in BT["uuids"] else "")})
+    for u in f["uuid128"]:
+        out.append({"what": "128-bit UUID", "value": u})
+    if d["name"]:
+        out.append({"what": "Name", "value": d["name"]})
+    return out
+
+
+def _changing(raws):
+    """Byte positions that differ between same-length advertisements: counters, rotating ids."""
+    by_len = Counter(len(r) for r in raws)
+    if not by_len:
+        return []
+    ln = by_len.most_common(1)[0][0]
+    same = [r for r in raws if len(r) == ln]
+    if len(same) < 2:
+        return []
+    diff = [i for i in range(ln // 2) if len({r[2 * i:2 * i + 2] for r in same}) > 1]
+    spans, start = [], None
+    for i in range(ln // 2 + 1):
+        if i in diff and start is None:
+            start = i
+        elif i not in diff and start is not None:
+            spans.append(f"{start}" if i - 1 == start else f"{start}–{i - 1}")
+            start = None
+    return spans
+
+
+def _suggest(d, f, custom):
+    """A starting point for a rule: the most specific thing every radio of the bucket shares."""
+    m = {"kind": "BLE"}
+    if f["mfg"]:
+        m["mfg"] = f["mfg"]
+        if f["mfg_data"][:1]:
+            m["mfg_data_prefix"] = f["mfg_data"][:1].hex().upper()
+    elif f["sd"]:
+        m["service_data_uuid"] = sorted(f["sd"])[0]
+    elif custom:
+        m["uuid128_any"] = [custom[0]]
+    elif f["svc"]:
+        m["service_uuid_any"] = sorted(f["svc"])[:1]
+    else:
+        ads = [t for t, _ in f["ads"] if t not in GENERIC_AD]
+        if ads:
+            m["ad_type"] = ads[0]
+    shape = _name_shape(d["name"] or d.get("group_name", ""))
+    if shape and len(m) == 1:
+        m["name_regex"] = "^" + re.escape(shape).replace("\\#", "[0-9A-Za-z]+").replace("#", "[0-9A-Za-z]+") + "$"
+    return m
+
+
+def _hints(b, ds, f, custom):
+    h = []
+    if f["mfg"]:
+        comp = BT["companies"].get(f["mfg"])
+        h.append(f"Company 0x{f['mfg']} is {comp} in the Bluetooth SIG list." if comp else
+                 f"Company 0x{f['mfg']} is not in the Bluetooth SIG list: maybe a made-up ID or the raw is cut short.")
+    for u in sorted(f["sd"]) + sorted(f["svc"] - set(f["sd"])):
+        e = BT["uuids"].get(u)
+        if e:
+            h.append(f"UUID {u} is {e['name']} ({'a member UUID of that company' if e.get('kind') == 'member' else e.get('kind', 'SIG')}).")
+    for u in custom:
+        h.append(f"{u} is a vendor's own UUID: searching it on GitHub often finds the app or library that uses it.")
+    days = set().union(*(d["_days"] for d in ds)) if ds else set()
+    trav = sum(1 for d in ds if d["travelled"])
+    if trav and trav >= len(ds) / 2:
+        h.append(f"{trav} of {len(ds)} travelled with you: possibly your own device, or one in your car or bag.")
+    places = {(round(d["lat"], 3), round(d["lon"], 3)) for d in ds if d["lat"] is not None}
+    if len(days) >= 3 and len(places) <= 2:
+        h.append(f"Heard on {len(days)} days at the same place: probably fixed equipment there.")
+    if len(ds) >= 5 and len({d['group'] or d['mac'] for d in ds}) < len(ds) / 2:
+        h.append("Many addresses but few devices: the device changes its address (privacy), the group keeps it together.")
+    elif len(ds) >= 10:
+        h.append("Many addresses with the same advertisement: a common product, or one device rotating its address.")
+    names = {d["name"] for d in ds if d["name"]}
+    if names:
+        h.append("Names heard: " + ", ".join(sorted(names)[:6]) + ". A product's default name is often the best search term.")
+    if not f["mfg"] and not f["sd"] and not custom and not f["svc"]:
+        h.append("Only flags (or nothing): the device sends the rest in a scan response, which Fieldwatch does not log.")
+    return h
+
+
+@app.route("/api/wb/fp")
+@needs("admin")
+def api_wb_fp():
+    fp = request.args.get("fp", "")
+    st = _wb_state()
+    b = st["buckets"].get(fp)
+    if not b:
+        return jsonify({"error": "not found (the data or the rules changed; reload)"}), 404
+    notes = _wb_notes()
+    tab = next((t for t in WB_TABS if any(d["_tab"] == t for d in b["devs"])), None)
+    ds = sorted(b["devs"], key=lambda d: -d["hears"])
+    ex = ds[0]
+    _, _, x = _fingerprint(ex)
+    f, custom = x["f"], x["custom"]
+    raws = [d["raw"] for d in ds if d["raw"]]
+    variants = [{"raw": r, "count": n} for r, n in Counter(raws).most_common(20)]
+    # heard together with: other BLE radios in the same 5-minute slots, by what they are
+    slots = set().union(*(d["_slots"] for d in ds)) if ds else set()
+    near = Counter()
+    if slots:
+        for d in st["devs"]:
+            if d["_fp"] == fp:
+                continue
+            shared = len(d["_slots"] & slots)
+            if shared and shared >= max(2, len(slots) // 3):
+                what = d["ident"] or (d["category"] if d["category"] != "Unidentified" else "") or "unknown: " + st["buckets"][d["_fp"]]["label"][:60]
+                near[what] += 1
+    q = custom[0] if custom else (f"0x{f['mfg']} {f['mfg_data'][:1].hex().upper()}" if f["mfg"] else (sorted(f["sd"])[0] if f["sd"] else ""))
+    names = sorted({d["name"] for d in ds if d["name"]})
+    search = []
+    if q:
+        search.append({"label": "Search the web", "url": "https://www.google.com/search?q=" + quote_plus(f'"{q}" bluetooth')})
+        search.append({"label": "Search GitHub code", "url": "https://github.com/search?type=code&q=" + quote_plus(q.replace("0x", "").split()[0])})
+    if names:
+        search.append({"label": f"Search '{names[0][:24]}'", "url": "https://www.google.com/search?q=" + quote_plus(f'"{names[0]}" bluetooth')})
+    search.append({"label": "SIG assigned numbers", "url": "https://www.bluetooth.com/specifications/assigned-numbers/"})
+    item = _wb_item(b, None, notes)
+    item["tab"] = tab
+    return jsonify({
+        "item": item, "decoded": _decode(ex, f), "variants": variants, "changing": _changing(raws),
+        "hints": _hints(b, ds, f, custom), "search": search,
+        "together": [{"what": k, "n": n} for k, n in near.most_common(8)],
+        "suggest": _suggest(ex, f, custom),
+        "radios": [{"kind": d["kind"], "mac": d["mac"], "name": d["name"], "rssi_max": d["rssi_max"], "hears": d["hears"],
+                    "days": sorted(d["_days"]), "lat": d["lat"], "lon": d["lon"], "travelled": d["travelled"],
+                    "ident": d["ident"], "group": d["group"]} for d in ds[:60]],
+    })
+
+
+@app.route("/api/wb/note", methods=["POST"])
+@needs("admin")
+def api_wb_note():
+    b = request.get_json(silent=True) or {}
+    fp, status, note = str(b.get("fp", ""))[:40], str(b.get("status", "new")), str(b.get("note", ""))[:2000]
+    if not re.fullmatch(r"[0-9a-f]{12}", fp) or status not in WB_STATUS:
+        return jsonify({"error": "bad fingerprint or status"}), 400
+    u = current_user()
+    with _db_lock, db() as con:
+        con.execute("INSERT INTO wb_notes(fp, status, note, updated, by_user) VALUES (?,?,?,?,?)"
+                    " ON CONFLICT(fp) DO UPDATE SET status=excluded.status, note=excluded.note,"
+                    " updated=excluded.updated, by_user=excluded.by_user",
+                    (fp, status, note, datetime.now().isoformat(timespec="seconds"), u.get("username", "")))
+    return jsonify({"ok": True})
+
+
+_HEX = re.compile(r"^[0-9A-F]*$")
+_UUID128 = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
+LAYERS = sorted(set(CLASS_CATEGORY.values()) - {"Network"})
+
+
+def _clean_rule(r, need_meta=True):
+    """Check a rule made in the Workbench; returns (rule, error)."""
+    m_in = r.get("match") or {}
+    if not isinstance(m_in, dict):
+        return None, "match must be an object"
+    m = {"kind": "BLE"}
+    for k in ("mfg", "service_data_uuid"):
+        v = str(m_in.get(k) or "").strip().upper().replace("0X", "")
+        if v:
+            if not re.fullmatch(r"[0-9A-F]{1,4}", v):
+                return None, f"{k}: 4 hex digits"
+            m[k] = v.zfill(4)
+    for k in ("mfg_data_prefix", "ad_data_prefix"):
+        v = str(m_in.get(k) or "").strip().upper().replace(" ", "")
+        if v:
+            if not _HEX.match(v) or len(v) % 2 or len(v) > 64:
+                return None, f"{k}: whole bytes of hex"
+            m[k] = v
+    v = str(m_in.get("ad_type") or "").strip().upper()
+    if v:
+        if not re.fullmatch(r"[0-9A-F]{2}", v):
+            return None, "ad_type: 2 hex digits"
+        m["ad_type"] = v
+    for k, pat in (("service_uuid_any", r"[0-9A-F]{4}"), ("uuid128_any", _UUID128.pattern[1:-1])):
+        v = m_in.get(k)
+        if v:
+            if isinstance(v, str):
+                v = [x for x in re.split(r"[,\s]+", v) if x]
+            v = [str(x).strip().upper() for x in v][:10]
+            if not all(re.fullmatch(pat, x) for x in v):
+                return None, f"{k}: list of {'4-digit' if k == 'service_uuid_any' else '8-4-4-4-12'} UUIDs"
+            m[k] = v
+    v = str(m_in.get("name_regex") or "").strip()
+    if v:
+        if len(v) > 200:
+            return None, "name_regex too long"
+        try:
+            re.compile(v)
+        except re.error as e:
+            return None, f"name_regex: {e}"
+        m["name_regex"] = v
+    if len(m) == 1:
+        return None, "the rule needs at least one condition"
+    if not need_meta:
+        return {"id": "preview", "name": "preview", "match": m}, None
+    name = str(r.get("name") or "").strip()[:80]
+    layer = str(r.get("layer") or "")
+    conf = str(r.get("confidence") or "low")
+    if not name:
+        return None, "give the rule a name"
+    if layer and layer not in LAYERS:
+        return None, "unknown layer"
+    if conf not in WB_CONF:
+        return None, "confidence: high, medium or low"
+    rid = re.sub(r"[^a-z0-9]+", "-", str(r.get("id") or name).lower()).strip("-")[:48] or "rule"
+    if not rid.startswith("local-"):
+        rid = "local-" + rid
+    out = {"id": rid, "name": name, "layer": layer, "confidence": conf, "match": m,
+           "note": str(r.get("note") or "").strip()[:1000]}
+    if r.get("fp"):
+        out["from_fp"] = str(r["fp"])[:12]
+    return out, None
+
+
+def _compile_one(rule):
+    load = {"_m": dict(rule["match"])}
+    m = load["_m"]
+    if m.get("name_regex"):
+        m["_name_re"] = re.compile(m["name_regex"], re.I)
+    for k in ("service_uuid_any", "uuid128_any"):
+        if m.get(k):
+            m[k] = set(m[k])
+    return m
+
+
+@app.route("/api/wb/preview", methods=["POST"])
+@needs("admin")
+def api_wb_preview():
+    rule, err = _clean_rule(request.get_json(silent=True) or {}, need_meta=False)
+    if err:
+        return jsonify({"error": err}), 400
+    m = _compile_one(rule)
+    st = _wb_state()
+    hit = [d for d in st["devs"] if _rule_matches(m, d["kind"], d["name"] or d["group_name"], adv_features(d["mfg"], d["raw"], d["uuids"]))]
+    by = Counter(d["_tab"] or "identified" for d in hit)
+    others = Counter(d["ident"] for d in hit if not d["_tab"] and d["ident"])
+    return jsonify({"match": rule["match"], "matches": len(hit), "by_tab": dict(by),
+                    "kinds": len({d["_fp"] for d in hit}),
+                    "already": [{"ident": k, "n": n} for k, n in others.most_common(6)],
+                    "examples": [{"mac": d["mac"], "name": d["name"], "label": st["buckets"][d["_fp"]]["label"]} for d in hit[:8]]})
+
+
+def _save_local(rules):
+    os.makedirs(IDS_DIR, exist_ok=True)
+    tmp = LOCAL_RULES + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"name": "Harava local rules", "note": "Made in the Workbench on this server; not in git. "
+                   "Send good ones to be added to harava_ids.json.", "rules": rules}, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, LOCAL_RULES)
+
+
+@app.route("/api/wb/rules")
+@needs("admin")
+def api_wb_rules():
+    return jsonify({"rules": [{k: v for k, v in r.items() if k != "local"} for r in LOCAL["rules"]], "layers": LAYERS})
+
+
+@app.route("/api/wb/rule", methods=["POST"])
+@needs("admin")
+def api_wb_rule():
+    body = request.get_json(silent=True) or {}
+    rule, err = _clean_rule(body)
+    if err:
+        return jsonify({"error": err}), 400
+    rules = [{k: v for k, v in r.items() if k != "local"} for r in LOCAL["rules"]]
+    rule["created"] = datetime.now().isoformat(timespec="seconds")
+    rules = [r for r in rules if r["id"] != rule["id"]] + [rule]
+    with _db_lock:
+        _save_local(rules)
+        status = load_ids()
+    if rule.get("from_fp"):
+        with _db_lock, db() as con:
+            con.execute("INSERT INTO wb_notes(fp, status, note, updated, by_user) VALUES (?, 'identified', ?, ?, ?)"
+                        " ON CONFLICT(fp) DO UPDATE SET status='identified', updated=excluded.updated",
+                        (rule["from_fp"], f"rule {rule['id']}", datetime.now().isoformat(timespec="seconds"),
+                         current_user().get("username", "")))
+    return jsonify({"ok": True, "id": rule["id"], "status": status, "rules": len(HV_RULES)})
+
+
+@app.route("/api/wb/rule/<rid>", methods=["DELETE"])
+@needs("admin")
+def api_wb_rule_delete(rid):
+    rules = [{k: v for k, v in r.items() if k != "local"} for r in LOCAL["rules"]]
+    keep = [r for r in rules if r["id"] != rid]
+    if len(keep) == len(rules):
+        return jsonify({"error": "no such local rule"}), 404
+    with _db_lock:
+        _save_local(keep)
+        load_ids()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/wb/export")
+@needs("admin")
+def api_wb_export():
+    """The local rules and the notes as one JSON file, to move them to harava_ids.json or another server."""
+    st, notes = _wb_state(), _wb_notes()
+    data = {"exported": datetime.now().isoformat(timespec="seconds"), "harava": APP_VERSION,
+            "rules": [{k: v for k, v in r.items() if k != "local"} for r in LOCAL["rules"]],
+            "notes": [dict(n, label=st["buckets"][n["fp"]]["label"] if n["fp"] in st["buckets"] else "")
+                      for n in notes.values()]}
+    resp = app.response_class(json.dumps(data, ensure_ascii=False, indent=1), mimetype="application/json")
+    resp.headers["Content-Disposition"] = f"attachment; filename=harava_workbench_{datetime.now():%Y%m%d}.json"
+    return resp
+
+
+@app.route("/workbench")
+@needs("admin")
+def workbench():
+    return render_template("workbench.html", app_name=APP_NAME, version=APP_VERSION, user=current_user(),
+                           layers=LAYERS)
 
 
 # ─────────────── my devices ───────────────

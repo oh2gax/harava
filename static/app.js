@@ -2,33 +2,6 @@
 'use strict';
 
 // ─────────────── state ───────────────
-// Device layers: one per Fieldwatch signature class (names match CLASS_CATEGORY in the server).
-// Watch-list layers get an icon pin on the map so they stand out from the dots.
-const CAT = [
-    ['Watch list', 'Glasses & VR', '#e879f9', '🕶️'],
-    ['Watch list', 'Tracker', '#f43f5e', '🏷️'],
-    ['Watch list', 'Surveillance', '#e11d48', '🎥'],
-    ['Watch list', 'Police / body cam', '#3b82f6', '🚓'],
-    ['Watch list', 'Drone', '#fb923c', '🚁'],
-    ['Watch list', 'Hacking tool', '#d946ef', '💀'],
-    ['Personal', 'Phone / PC', '#38bdf8'],
-    ['Personal', 'Audio', '#a78bfa'],
-    ['Personal', 'Wearable', '#c084fc'],
-    ['Personal', 'Health', '#f472b6'],
-    ['Places & things', 'Vehicle', '#f59e0b'],
-    ['Places & things', 'Camera', '#fbbf24'],
-    ['Places & things', 'Smart lock', '#a3e635'],
-    ['Places & things', 'Home & IoT', '#4ade80'],
-    ['Places & things', 'Thermostat', '#34d399'],
-    ['Places & things', 'Shelf label / sign', '#22d3ee'],
-    ['Places & things', 'Beacon', '#2dd4bf'],
-    ['Places & things', 'Mesh radio', '#facc15'],
-    ['Background', 'Network', '#60a5fa'],
-    ['Background', 'Unidentified', '#94a3b8'],
-];
-const CAT_COLORS = Object.fromEntries(CAT.map(c => [c[1], c[2]]));
-const CAT_ICON = Object.fromEntries(CAT.filter(c => c[3]).map(c => [c[1], c[3]]));
-const CAT_ORDER = CAT.map(c => c[1]);
 
 const S = {
     summary: null, days: [], day: 'all', tFrom: '', tTo: '',
@@ -55,15 +28,6 @@ if (S.tlCat && !CAT_COLORS[S.tlCat]) S.tlCat = '';
 function saveHidden() { try { localStorage.setItem('fwa_hidden_layers', JSON.stringify([...S.hiddenCats])); } catch (e) {} }
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const pad = n => String(n).padStart(2, '0');
-function fmtTime(ms, withDate) {
-    if (!ms) return '';
-    const d = new Date(ms);
-    const t = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    return withDate ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${t}` : t;
-}
-function fmtM(m) { return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m'; }
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600); }
 async function api(url, opts) {
     const r = await fetch(url, opts);
@@ -162,7 +126,6 @@ async function refresh() {
 }
 
 // ─────────────── my devices ───────────────
-const OWN_MATCH_TXT = { mac: 'Address is', mac_prefix: 'Address starts with', name: 'Name is', name_contains: 'Name contains' };
 function ownMatch(d) { return S.own.find(r => ownRuleHits(r, d)) || null; }
 function tagOwn() { S.devices.forEach(d => { const r = ownMatch(d); d.own = r ? r.label : ''; }); }
 async function loadOwn(render = true) {
@@ -181,12 +144,6 @@ function renderOwn() {
         <td class="mono">${esc(r.value)}</td><td class="num">${counts[i]}</td>
         <td><button class="btn danger needs-analyze" onclick="delOwn(${r.id}, '${esc(r.label).replace(/'/g, "\\'")}')">Remove</button></td></tr>`).join('')
         || '<tr><td colspan="6" class="empty" style="padding:14px">No devices marked as yours yet.</td></tr>';
-}
-function ownRuleHits(r, d) {
-    if (r.kind && r.kind !== d.kind) return false;
-    const v = r.value.toLowerCase(), name = (d.name || d.group_name || '').toLowerCase(), mac = (d.mac || '').toLowerCase();
-    return (r.match === 'mac' && mac === v) || (r.match === 'mac_prefix' && mac.startsWith(v)) ||
-        (r.match === 'name' && !!name && name === v) || (r.match === 'name_contains' && name.includes(v));
 }
 function prefillOwn(kind, mac) {
     const d = S.devices.find(x => x.kind === kind && x.mac === mac) || { kind, mac, name: '', vendor: '', flags: '' };
@@ -268,26 +225,6 @@ function renderIdentAs() {
     sel.classList.toggle('active', !!S.identAs);
 }
 function setIdentAs(v) { S.identAs = v; renderAll(); }
-// Addresses that Harava's database says belong to one device (same Mesh UUID, same custom service …)
-// become one row / one pin: the loudest address represents them, hears are summed.
-function groupSame(list) {
-    const out = [], seen = new Map();
-    for (const d of list) {
-        if (!d.group || (d.group_size || 1) < 2) { out.push(d); continue; }
-        let g = seen.get(d.group);
-        if (!g) { g = { ...d, _n: 0, _hears: 0, _first: d.first, _last: d.last }; seen.set(d.group, g); out.push(g); }
-        g._n += 1; g._hears += d.hears;
-        g._first = Math.min(g._first, d.first); g._last = Math.max(g._last, d.last);
-        if ((d.rssi_max ?? -999) > (g.rssi_max ?? -999)) {   // the loudest address represents the device
-            const keep = { _n: g._n, _hears: g._hears, _first: g._first, _last: g._last };
-            Object.assign(g, d, keep);
-        }
-    }
-    for (const g of seen.values()) {
-        if (g._n > 1) { g.hears = g._hears; g.first = g._first; g.last = g._last; if (!g.name && g.group_name) g.name = g.group_name; }
-    }
-    return out;
-}
 function setGroupSame(v) { S.groupSame = v; localStorage.setItem('fwa_group', v ? '1' : '0'); renderAll(); }
 function setDay(v) { S.day = v; S.tFrom = S.tTo = ''; $('tFrom').value = $('tTo').value = ''; didFit = false; loadAll(); syncPhoneWindow(); }
 function stepDay(n) {
@@ -659,19 +596,6 @@ function pcRange() {
     const a = new Date(y, m - 1, d, h, mi).getTime();
     return { day, a, b: a + len * 60000 };
 }
-function phoneType(d, opts) {
-    if (d.kind !== 'BLE') return null;
-    if (!['Phone / PC', 'Unidentified'].includes(d.category)) return null;
-    const f = d.fleets || '', n = (d.name || '').toLowerCase();
-    if (/\btv\b|\[tv\]|qled|oled|series|monitor|soundbar|fridge|watch|buds|band|fit\d|ring|speaker/.test(n)) return null;
-    if (f.includes('Microsoft Device')) return opts.ms ? 'Windows PC' : null;
-    if (f.includes('Apple Device') || (d.mfg === '4C' && !f)) return 'Apple';
-    if (d.mfg === '75') return 'Samsung';
-    if (f.includes('Google') || f.includes('Fast Pair')) return 'Android';
-    if (f.includes('Phone hotspot')) return 'Phone';
-    if (opts.unident && d.category === 'Unidentified' && (d.flags || '').includes('RAND')) return 'Unidentified';
-    return null;
-}
 function pcFromInputs() { loadPhoneCheck(); }
 async function loadPhoneCheck() {
     const r = pcRange();
@@ -691,29 +615,16 @@ function pcPhones() {
 function pcAuto() {
     const ph = pcPhones(), n = Math.max(1, parseInt($('pcExpected').value) || 30);
     if (!ph.length) { toast('No phones in this window'); return; }
-    // only phones loud enough to be in the room take part; the box limit never goes below room limit + 3 dB
-    const room = parseFloat($('pcRoom').value), floor = room + 3;
-    const inRoom = ph.filter(x => x.rssi >= room);
-    let lim = null, why = '';
-    if (inRoom.length >= n) { lim = Math.max(floor, inRoom[n - 1].rssi - 2); why = `just below the ${n}th strongest phone`; }
-    else {
-        // fewer phones than expected: look for a clear gap (≥ 6 dB) between the box group and the rest of the room
-        let best = 0, at = null;
-        for (let i = 0; i < inRoom.length - 1; i++) {
-            const g = inRoom[i].rssi - inRoom[i + 1].rssi;
-            if (g > best) { best = g; at = Math.floor((inRoom[i].rssi + inRoom[i + 1].rssi) / 2); }
-        }
-        if (at !== null && best >= 6) { lim = Math.max(floor, at); why = `in the ${best} dB gap between the strong group and the rest`; }
-    }
-    if (lim === null) { toast('No clear box group found — keeping ' + $('pcBox').value + ' dBm. Try a window when all phones are in the box.'); return; }
-    $('pcBox').value = lim;
+    const r = phoneBoxLimit(ph, n, parseFloat($('pcRoom').value));
+    if (!r) { toast('No clear box group found — keeping ' + $('pcBox').value + ' dBm. Try a window when all phones are in the box.'); return; }
+    $('pcBox').value = r.lim;
     runPhoneCheck();
-    toast(`Box limit set to ${lim} dBm (${why})`);
+    toast(`Box limit set to ${r.lim} dBm (${r.why})`);
 }
 function runPhoneCheck() {
     const box = parseFloat($('pcBox').value), room = parseFloat($('pcRoom').value);
     const n = parseInt($('pcExpected').value) || 0;
-    const ph = pcPhones().map(x => ({ ...x, zone: x.rssi >= box ? 'box' : (x.rssi >= room ? 'room' : 'out') }));
+    const ph = phoneZones(pcPhones(), box, room);
     const inBox = ph.filter(x => x.zone === 'box').length, inRoom = ph.filter(x => x.zone === 'room').length, out = ph.filter(x => x.zone === 'out').length;
     $('pcExp').textContent = n; $('pcInBox').textContent = inBox; $('pcInRoom').textContent = inRoom; $('pcOut').textContent = out;
     let v;

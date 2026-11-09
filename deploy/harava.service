@@ -14,6 +14,8 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/harava
 ExecStart=/home/ubuntu/harava/venv/bin/python harava.py --no-browser
 Environment=PYTHONUNBUFFERED=1
+# days and times in Finnish time (the server itself runs in UTC); change to your own zone
+Environment=TZ=Europe/Helsinki
 Restart=on-failure
 RestartSec=10
 # light hardening that does not touch other services

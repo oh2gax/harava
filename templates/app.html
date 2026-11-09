@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- Harava phone app /app (from 2026-11-09): the user interface of the WSPR Logger phone view — one view at
+     a time, full screen, every choice in the ☰ menu (static/m-app.js, static/m-app.css). The menu's selects
+     marked data-chips are shown as tap buttons by m-app.js. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ app_name }}</title>
+<meta name="theme-color" content="#111827">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="{{ app_name }}">
+<link rel="manifest" href="{{ url_for('app_manifest') }}">
+<link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/app-192.png') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}"/>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
+<script>
+(function () {
+    // the theme before the first paint: the same setting as the full page (fwa_theme_mode: auto / dark / light)
+    try {
+        var m = localStorage.getItem('fwa_theme_mode');
+        if (m !== 'dark' && m !== 'light') m = 'auto';
+        var light = m === 'light' || (m === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+        if (light) document.documentElement.classList.add('light');
+        document.documentElement.dataset.themeMode = m;
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=build) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css', v=build) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='m-app.css', v=build) }}">
+</head>
+<body class="app-body role-{{ user.role }}">
+
+<header class="app-bar">
+  <button id="app-menu-btn" class="app-icon-btn" type="button" aria-label="Menu" aria-controls="app-drawer" aria-expanded="false">☰<span id="app-menu-dot" class="app-news-dot app-menu-dot" hidden></span></button>
+  <div class="app-title"><span id="app-title">{{ app_name }}</span><small id="app-sub"></small></div>
+  <!-- the phone's local time: Harava shows all times in local time -->
+  <div id="app-utc" class="app-utc" title="Local time" aria-label="Local time"><b id="app-utc-t">--:--</b><small id="app-utc-l">local</small></div>
+  <button id="app-theme-btn" class="app-icon-btn app-theme-btn" type="button" aria-label="Theme" title="Theme">
+    <svg class="ic-sun" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <svg class="ic-moon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M20.2 14.6A8.3 8.3 0 0 1 9.4 3.8a8.3 8.3 0 1 0 10.8 10.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    <svg class="ic-auto" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3.8a8.2 8.2 0 0 0 0 16.4z" fill="currentColor"/></svg>
+  </button>
+  <div id="app-theme-note" class="app-theme-note" role="status" aria-live="polite" hidden></div>
+  <!-- the data: green when the newest hear is less than 6 h old, amber within 2 days, red older -->
+  <span id="app-health" class="app-health" title="Newest data"></span>
+</header>
+
+<div class="app-main" role="main">
+
+  <!-- Map: the phone's path and one pin per radio, at the place it was heard loudest -->
+  <section id="v-map" class="app-view app-mapview" hidden>
+    <div class="app-mapbox"><div id="m-map" class="app-map"></div></div>
+    <div class="app-map-cards">
+      <div class="app-live-card tap" id="m-sel-card" hidden>
+        <div class="lc-row1"><span class="cdot" id="m-sel-dot"></span><b id="m-sel-name">—</b><span class="r" id="m-sel-rssi"></span><span class="lc-x" id="m-sel-x" role="button" aria-label="Close">×</span></div>
+        <div class="lc-row2"><span id="m-sel-cat"></span><span id="m-sel-ident"></span></div>
+        <div class="lc-more">Details ›</div>
+      </div>
+      <div class="app-live-card" id="m-stat-card">
+        <div class="lc-row1"><b id="m-st-day">—</b><span class="r" id="m-st-time"></span></div>
+        <div class="lc-row2"><span><b id="m-st-dev">—</b> radios</span><span><b id="m-st-wifi">—</b> Wi-Fi</span><span><b id="m-st-ble">—</b> BLE</span><span id="m-st-watch"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Day: the counts, the hears through the day and the layers -->
+  <section id="v-day" class="app-view" hidden>
+    <div class="m-card">
+      <div class="m-card-hd" id="m-day-t">—</div>
+      <div class="m-tiles m-tiles3">
+        <div><span>Radios</span><b id="m-d-dev" class="acc">—</b></div>
+        <div><span>Hears</span><b id="m-d-hears">—</b></div>
+        <div><span>Hours</span><b id="m-d-span" class="sm">—</b></div>
+        <div><span>Wi-Fi</span><b id="m-d-wifi">—</b></div>
+        <div><span>Bluetooth</span><b id="m-d-ble">—</b></div>
+        <div><span>Identified</span><b id="m-d-ident" class="grn">—</b></div>
+        <div><span>Trackers</span><b id="m-d-trk">—</b><small id="m-d-sep"></small></div>
+        <div><span>Glasses &amp; VR</span><b id="m-d-gl">—</b></div>
+        <div><span>Travelled</span><b id="m-d-trav">—</b></div>
+      </div>
+    </div>
+    <div class="m-card">
+      <div class="m-card-hd"><span id="m-tl-t">Hears per 10 min</span><span class="m-hd-r" id="m-tl-sub"></span></div>
+      <div class="m-chart m-chart-s"><canvas id="m-tl-c"></canvas></div>
+      <div class="m-small" id="m-tl-note"></div>
+    </div>
+    <div class="m-card">
+      <div class="m-card-hd">Device layers <span class="m-hd-r">tap one to list it</span></div>
+      <div id="m-day-cats" class="m-cbars"></div>
+    </div>
+    <div class="m-card">
+      <div class="m-card-hd">Identified as <span class="m-hd-r">the most common</span></div>
+      <div id="m-day-ident" class="m-cbars"></div>
+    </div>
+  </section>
+
+  <!-- Watch list: glasses, trackers, surveillance, police, drones and hacking tools -->
+  <section id="v-watch" class="app-view" hidden>
+    <div id="m-watch"></div>
+  </section>
+
+  <!-- Devices: every radio, searchable -->
+  <section id="v-dev" class="app-view" hidden>
+    <div class="app-hist-bar">
+      <input type="search" id="m-dev-q" class="app-hist-q" placeholder="Search name, address, identified as…" autocomplete="off" spellcheck="false">
+      <span id="m-dev-n" class="app-hist-n"></span>
+    </div>
+    <div id="m-dev-list" class="app-hist-list"></div>
+  </section>
+
+  <!-- Device: one radio -->
+  <section id="v-device" class="app-view" hidden>
+    <div class="m-card" id="m-dv-card"></div>
+    <div class="m-card"><div class="m-card-hd">Signal <span class="m-hd-r" id="m-dv-chart-t"></span></div><div class="m-chart m-chart-s"><canvas id="m-dv-c"></canvas></div></div>
+    <div class="m-card m-pad0"><div class="m-minimap"><div id="m-dv-map" class="app-map"></div></div></div>
+    <div class="m-small" style="margin:0 4px">The dots: every place your phone heard this radio, the dashed line in time order.</div>
+  </section>
+
+  <!-- Phone check: are all phones in the box? -->
+  <section id="v-phone" class="app-view" hidden>
+    <div class="m-card">
+      <div class="m-card-hd">Phone check <span class="m-hd-r" id="m-pc-win"></span></div>
+      <div class="m-form">
+        <label>Window start<input type="time" id="m-pc-start" step="60"></label>
+        <label>Length (min)<input type="number" id="m-pc-len" min="1" max="30" value="3" inputmode="numeric"></label>
+        <label>Expected phones<input type="number" id="m-pc-exp" min="1" max="200" value="30" inputmode="numeric"></label>
+        <label>&nbsp;<button type="button" class="app-btn app-btn-primary" id="m-pc-auto">Auto-calibrate</button></label>
+        <label>Box ≥ dBm<input type="number" id="m-pc-box" value="-55" inputmode="numeric"></label>
+        <label>Room ≥ dBm<input type="number" id="m-pc-room" value="-80" inputmode="numeric"></label>
+      </div>
+    </div>
+    <div class="m-card">
+      <div class="m-verdict" id="m-pc-verdict">Choose the day in ☰ and the window start: a moment when the phones are in the box.</div>
+      <div class="m-tiles m-tiles3" style="margin-top:8px">
+        <div><span>In the box</span><b id="m-pc-box-n" class="grn">—</b></div>
+        <div><span>In the room</span><b id="m-pc-room-n" class="red">—</b></div>
+        <div><span>Weak / out</span><b id="m-pc-out-n">—</b></div>
+      </div>
+    </div>
+    <div class="m-card"><div class="m-card-hd">Phones by signal <span class="m-hd-r">2 dB steps</span></div><div class="m-chart m-chart-s"><canvas id="m-pc-c"></canvas></div></div>
+    <div id="m-pc-list" class="app-hist-list"></div>
+  </section>
+
+  <!-- Identification: what Harava's own database names -->
+  <section id="v-ids" class="app-view" hidden>
+    <div class="m-card">
+      <div class="m-card-hd">Identification <span class="m-hd-r" id="m-id-db"></span></div>
+      <div class="m-tiles">
+        <div><span>Bluetooth radios</span><b id="m-id-ble">—</b></div>
+        <div><span>Fieldwatch left</span><b id="m-id-left" class="amb">—</b></div>
+        <div><span>Identified by Harava</span><b id="m-id-ok" class="grn">—</b></div>
+        <div><span>Still unknown</span><b id="m-id-still" class="red">—</b></div>
+        <div class="w2"><span>Changing addresses → devices</span><b id="m-id-grp" class="sm">—</b></div>
+      </div>
+    </div>
+    <div class="m-card"><div class="m-card-hd">Still unknown — what they advertise</div><div id="m-id-pats"></div></div>
+    <div class="m-card"><div class="m-card-hd">Rules that matched <span class="m-hd-r">hits</span></div><div id="m-id-rules" class="m-cbars"></div></div>
+  </section>
+
+  <!-- Imports: upload Fieldwatch exports from the phone -->
+  <section id="v-imp" class="app-view" hidden>
+    <div class="m-card needs-analyze">
+      <div class="m-card-hd">Upload Fieldwatch exports</div>
+      <div class="m-upload">
+        <button type="button" class="app-btn app-btn-primary" id="m-imp-pick">Choose files…</button>
+        <input type="file" id="m-imp-file" multiple accept=".csv,.jsonl,.json,.kml,text/csv,application/json,application/vnd.google-earth.kml+xml,text/plain,*/*" hidden>
+        <div class="m-small">Log export CSV or JSON lines, Sit export, or KML — for example straight from Fieldwatch's Downloads on this phone. A file already imported is skipped.</div>
+        <div class="m-res" id="m-imp-res"></div>
+      </div>
+    </div>
+    <div class="m-card"><div class="m-card-hd">Imported files <span class="m-hd-r" id="m-imp-n"></span></div><div id="m-imp-list" class="app-hist-list"></div></div>
+  </section>
+
+  <!-- Workbench (admins): unknown radios grouped by what they advertise -->
+  <section id="v-wb" class="app-view" hidden>
+    <div class="app-hist-bar">
+      <input type="search" id="m-wb-q" class="app-hist-q" placeholder="Search pattern, name, note…" autocomplete="off" spellcheck="false">
+      <span id="m-wb-n" class="app-hist-n"></span>
+    </div>
+    <div id="m-wb-prog" class="m-small" style="margin:0 12px 6px"></div>
+    <div id="m-wb-list" class="app-hist-list"></div>
+  </section>
+  <section id="v-wbd" class="app-view" hidden>
+    <div id="m-wbd"></div>
+  </section>
+</div>
+
+<div id="app-backdrop" class="app-backdrop" hidden></div>
+<div id="app-drawer" class="app-drawer" role="dialog" aria-label="Menu" aria-hidden="true">
+  <div class="app-drawer-head">
+    <span class="app-drawer-title">{{ app_name }}
+      <button type="button" class="app-head-news" id="app-news-btn2">What's new<span id="app-news-dot2" class="app-news-dot" hidden></span></button>
+    </span>
+    <button id="app-menu-close" class="app-icon-btn" type="button" aria-label="Close">✕</button>
+  </div>
+  <!-- the day: shared by every view -->
+  <div class="app-dayrow">
+    <span>Day</span>
+    <div class="app-stepper">
+      <button type="button" class="app-step" id="m-day-prev" aria-label="Previous day">‹</button>
+      <select id="m-day"></select>
+      <button type="button" class="app-step" id="m-day-next" aria-label="Next day">›</button>
+    </div>
+  </div>
+  <div class="app-tiles" role="group" aria-label="View">
+    <button type="button" class="app-tile" data-view="map"><b>Map</b><small>path · pins · layers</small></button>
+    <button type="button" class="app-tile" data-view="day"><b>Day</b><small>counts · timeline</small></button>
+    <button type="button" class="app-tile" data-view="watch"><b>Watch list</b><small>glasses · trackers …</small></button>
+    <button type="button" class="app-tile" data-view="dev"><b>Devices</b><small>every radio · search</small></button>
+    <button type="button" class="app-tile" data-view="phone"><b>Phone check</b><small>phones in the box?</small></button>
+    <button type="button" class="app-tile" data-view="ids"><b>Identification</b><small>Harava's database</small></button>
+    <button type="button" class="app-tile" data-view="imp"><b>Imports</b><small>upload exports</small></button>
+    {% if user.role == 'admin' %}<button type="button" class="app-tile" data-view="wb"><b>Workbench</b><small>unknown radios</small></button>{% endif %}
+  </div>
+
+  <details class="app-sec" data-for="filter">
+    <summary>Filter</summary>
+    <div class="app-field"><span>Radio</span>
+      <select id="m-f-kind" data-chips><option value="ALL">All</option><option value="WIFI">Wi-Fi</option><option value="BLE">Bluetooth</option></select></div>
+    <div class="app-field"><span>Signal at least</span>
+      <select id="m-f-rssi" data-chips><option value="-200">Any</option><option value="-90">−90 dBm</option><option value="-80">−80 dBm</option><option value="-70">−70 dBm</option><option value="-60">−60 dBm</option></select></div>
+    <div class="app-field"><span>Layer</span><select id="m-f-cat" class="m-sel"><option value="">All layers</option></select></div>
+    <div class="app-switches">
+      <label class="app-switch"><span>Group same device</span><input type="checkbox" id="m-f-group"></label>
+      <label class="app-switch"><span>Hide my devices</span><input type="checkbox" id="m-f-own"></label>
+      <label class="app-switch"><span>Travelled with me</span><input type="checkbox" id="m-f-trav"></label>
+      <label class="app-switch"><span>Named or identified</span><input type="checkbox" id="m-f-named"></label>
+      <label class="app-switch"><span>Heard only in Sit</span><input type="checkbox" id="m-f-sit"></label>
+    </div>
+    <div class="app-small">The filter applies to the Map, the Day counts, the Watch list and Devices. <i>Group same device</i>: the changing addresses of one device (the same Bluetooth Mesh number, or the same custom service and name) as one radio. <i>Hide my devices</i>: the radios of My devices (＋ My device on a radio's page, or on the full site). <i>Travelled with me</i>: heard at least {{ travel_min_m }} m apart, in two or more places. Remembered on the phone.</div>
+  </details>
+  <details class="app-sec" data-for="map">
+    <summary>Map options</summary>
+    <div class="app-switches">
+      <label class="app-switch"><span>Phone path</span><input type="checkbox" id="m-o-path"></label>
+      <label class="app-switch"><span>Status card</span><input type="checkbox" id="m-o-card"></label>
+      <label class="app-switch"><span>Spread stacked pins</span><input type="checkbox" id="m-o-spread"></label>
+      <label class="app-switch"><span>Remember position</span><input type="checkbox" id="m-o-keep"></label>
+    </div>
+    <div class="app-small">One pin per radio, where your phone heard it loudest: filled Bluetooth, rings Wi-Fi, bigger louder, the colour of its layer; glasses, trackers and other watch-list radios as icons, a separated tracker pulsing red. Tap a pin, then the card, for its details. ⌂ fits the day. <i>Spread stacked pins</i>: radios heard at the same spot are spread into a small flower so each can be tapped.</div>
+  </details>
+  <details class="app-sec" data-for="day">
+    <summary>Day options</summary>
+    <div class="app-field"><span>Timeline shows</span><select id="m-o-tlcat" class="m-sel"><option value="">All radios</option></select></div>
+    <div class="app-small">The bars: hears per 10 minutes (Wi-Fi blue, Bluetooth green); the line: radios heard for the first time. With one layer chosen, only its radios count — for example <i>Glasses &amp; VR</i>.</div>
+  </details>
+  <details class="app-sec" data-for="dev">
+    <summary>Devices options</summary>
+    <div class="app-field"><span>Sort by</span>
+      <select id="m-o-sort" data-chips><option value="rssi">Strongest</option><option value="hears">Most hears</option><option value="last">Latest</option><option value="name">Name</option><option value="cat">Layer</option></select></div>
+    <div class="app-small">Search matches the name, address, maker, signature, layer, <i>Identified as</i> and company. Tags: <i>N addr.</i> one device with many addresses, <i>travelled</i>, <i>separated</i> tracker, <i>sit only</i>, <i>★</i> my device. Tap a radio for its details.</div>
+  </details>
+  <details class="app-sec" data-for="phone">
+    <summary>Phone check options</summary>
+    <div class="app-field"><span>Signal of a phone</span>
+      <select id="m-o-pcstat" data-chips><option value="max">Strongest</option><option value="med">Median</option></select></div>
+    <div class="app-switches">
+      <label class="app-switch"><span>Count Windows PCs</span><input type="checkbox" id="m-o-pcms"></label>
+      <label class="app-switch"><span>Count unknown random</span><input type="checkbox" id="m-o-pcun"></label>
+    </div>
+    <div class="app-small">At the start of a lesson the phones go into a box next to the teacher's phone, which runs Fieldwatch. Import its log, choose the day, set the window start to a moment when the phones are in the box and 2–5 minutes, then <i>Auto-calibrate</i>. Phones of My devices never count. A metal box blocks the signal; use cardboard or plastic.</div>
+  </details>
+  <details class="app-sec" data-for="ids">
+    <summary>Identification options</summary>
+    <div class="app-small">Harava's own identification database, on top of Fieldwatch's signatures: the Bluetooth SIG numbers and Harava's rules. <i>Still unknown</i> lists what the unidentified radios advertise{% if user.role == 'admin' %}; the Workbench sorts them and turns them into rules{% endif %}.</div>
+  </details>
+  <details class="app-sec" data-for="imp">
+    <summary>Imports options</summary>
+    <div class="app-small">Upload needs the <i>Analyze</i> permission. A <b>log</b> and a <b>Sit export</b> of the same time work together: the log gives the timeline, the Sit every radio. A KML of the same time is switched off automatically. Switch a file off to leave it out without deleting it.</div>
+  </details>
+  {% if user.role == 'admin' %}
+  <details class="app-sec" data-for="wb">
+    <summary>Workbench options</summary>
+    <div class="app-field"><span>Show</span>
+      <select id="m-o-wbtab" data-chips><option value="unknown">Unknown</option><option value="weak">Weakly identified</option><option value="nodata">No data</option></select></div>
+    <div class="app-field"><span>Status</span>
+      <select id="m-o-wbst" data-chips><option value="">All</option><option value="new">New</option><option value="investigating">Investigating</option><option value="identified">Identified</option><option value="ignore">Ignore</option><option value="cannot">Can't identify</option></select></div>
+    <div class="app-small">Unknown radios of all days, grouped by what they advertise. Tap one for its decoded advertisement, days and hints; set its status and a note, or make a rule. Rules made here are kept on this server only (ids/local_rules.json); the full site's Workbench lists them and exports them.</div>
+  </details>
+  {% endif %}
+  <details class="app-sec app-sec-gen">
+    <summary>General</summary>
+    {% if not user.open %}<div class="app-userline">Signed in as <b>{{ (user.first_name ~ ' ' ~ user.last_name).strip() or user.username }}</b> · {{ user.role_name }}</div>{% endif %}
+    <div class="app-switches">
+      <label class="app-switch"><span>Mask addresses</span><input type="checkbox" id="m-o-mask"></label>
+    </div>
+    <div class="app-small">Theme: the button at the top right — a tap steps Dark (☾) → Light (☀) → Auto (◐, follows the phone); the same setting as the full site. The dot at the top right: the newest data — green less than 6 hours old, amber within 2 days, red older. <i>Mask addresses</i>: for screenshots — the second half of every address, all Wi-Fi names and other people's device names are hidden on the screen.</div>
+    <div class="app-small" id="app-health-txt"></div>
+    <div class="app-gen-btns">
+      <button type="button" class="app-btn" id="app-news-btn">What's new<span id="app-news-dot" class="app-news-dot" hidden></span></button>
+      <button type="button" class="app-btn" id="app-about-btn">About</button>
+      <button type="button" class="app-btn" id="app-guides-btn">User guides</button>
+    </div>
+    <div class="app-gen-btns">
+      {% if not user.open %}<a class="app-btn" href="/account" style="text-decoration:none">My account</a>{% endif %}
+      {% if user.role == 'admin' %}<a class="app-btn" href="/workbench" style="text-decoration:none">Workbench (full site)</a><a class="app-btn" href="/maintenance" style="text-decoration:none">Maintenance</a>{% endif %}
+      {% if not user.open %}<button type="button" class="app-btn" id="app-signout">Sign out</button>{% endif %}
+    </div>
+    <a class="app-link" href="/">Full site ↗</a>
+  </details>
+  <div class="app-foot">{{ app_name }} {{ version }}{% if not user.open %} · {{ user.username }}{% endif %} · data: Fieldwatch · maps: © OpenStreetMap © CARTO</div>
+</div>
+
+<!-- What's new, User guides and About: a full-screen sheet over the view; × / Esc / the phone's Back closes it -->
+<div id="app-sheet" class="app-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="app-sheet-title">
+  <div class="app-sheet-head">
+    <span class="app-sheet-tl"><span id="app-sheet-title" class="app-sheet-title">About</span>
+      <button id="app-sheet-alt" class="app-head-news" type="button" hidden>User guides</button>
+      <button id="app-sheet-alt2" class="app-head-news" type="button" hidden>About</button></span>
+    <button id="app-sheet-close" class="app-icon-btn" type="button" aria-label="Close">×</button>
+  </div>
+  <div class="app-sheet-body" id="app-sheet-body">
+    <div id="app-sheet-about" class="app-about" hidden>
+      <div class="about-row"><div class="about-lbl">What</div><div><b>{{ app_name }}</b> — Finnish for <i>rake</i>: it rakes through what your phone heard. It reads the logs and Sit exports of the <a href="https://github.com/OffGridPete/Fieldwatch" target="_blank" rel="noopener">Fieldwatch</a> Android app and shows every Wi-Fi access point and Bluetooth radio your phone heard, on a map and in lists, and names many that Fieldwatch leaves unidentified.</div></div>
+      <div class="about-row"><div class="about-lbl">Author</div><div>Otso Laakso / OH2GAX</div></div>
+      <div class="about-row"><div class="about-lbl">Data</div><div>Fieldwatch only listens: it never connects to anything. A pin is where <i>your phone</i> was when it heard the radio, not where the radio is.</div></div>
+      <div class="about-row"><div class="about-lbl">Software</div><div>{{ app_name }} {{ version }}<div class="about-note">Python / Flask, Leaflet, Chart.js; Bluetooth SIG Assigned Numbers; maps © OpenStreetMap © CARTO</div></div></div>
+      <div class="about-row"><div class="about-lbl">Source code</div><div>Public repository on GitHub:
+          <a href="https://github.com/oh2gax/harava" target="_blank" rel="noopener">https://github.com/oh2gax/harava</a></div></div>
+    </div>
+    <div id="app-sheet-guides" class="app-guides" hidden></div>
+    <div id="app-sheet-news" class="app-news" hidden></div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+window.FWA = {layers: {{ layers|tojson }}, role: {{ user.role|tojson }}, open: {{ (user.open or false)|tojson }}, appName: {{ app_name|tojson }},
+               version: {{ version|tojson }}, build: {{ build|tojson }}, travelMin: {{ travel_min_m }},
+               cartoApiKey: {{ carto_api_key|tojson }} };
+</script>
+<script src="{{ url_for('static', filename='common.js', v=build) }}"></script>
+<script src="{{ url_for('static', filename='m-app.js', v=build) }}"></script>
+<script src="{{ url_for('static', filename='privacy.js', v=build) }}"></script>
+</body>
+</html>

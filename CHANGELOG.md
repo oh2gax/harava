@@ -8,7 +8,41 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
 
 ## [2026-11-09]
 
+### Changed
+- `deploy/harava.service`: `Environment=TZ=Europe/Helsinki`, so days and times on the server
+  follow Finnish time (the server itself runs in UTC).
+
 ### Added
+- **Phone app** — `/app` (`templates/app.html`, `static/m-app.js`, `static/m-app.css`, icons in
+  `static/icons/`), the WSPR Logger phone view's design: top bar (☰, title + day, local clock, theme,
+  data status dot: newest hear < 6 h green, < 48 h amber), one view at a time (Map, Day, Watch list,
+  Devices, Device, Phone check, Identification, Imports, Workbench, Unknown radio), ☰ drawer with a
+  day stepper, view tiles and one folding option section per view (`select[data-chips]` → chips);
+  options in `localStorage` (`harava_app_opts`, `harava_app_view`, `harava_app_day`), theme shared
+  with the full page (`fwa_theme_mode`). Uses the same APIs and permissions; History API for Back
+  (menu, sheet, views). `/app/manifest.webmanifest` (open) for *Add to Home Screen*;
+  `/api/app/build` = newest mtime of `templates/` + `static/` (without `vendor/`): the app reloads
+  when it differs or after 1 h in the background.
+- **Shared helpers** — `static/common.js` (layers and colours, formatting, `ownRuleHits`,
+  `groupSame`, `phoneType`, `phoneBoxLimit`, `phoneZones`) used by `app.js` and `m-app.js`.
+- **Workbench (admin)** — `/workbench` (`templates/workbench.html`) and the phone app's Workbench.
+  `_fingerprint(d)`: BLE radios of all active imports bucketed by company + first byte of the
+  manufacturer data (Apple / Microsoft message types named), service data UUIDs, custom 128-bit
+  UUIDs, other services and AD types; the name's shape (`_name_shape`: alphanumeric runs with 3+
+  digits → `#`) only when nothing else tells. Tabs: `unknown` (data, no rule), `weak` (company only,
+  custom UUID only or a low-confidence rule), `nodata` (flags only). Cached in `_WB_CACHE` until the
+  active imports, the hear count or the rules change. APIs: `GET /api/wb?tab=` (items, counts,
+  kinds, per-day progress, statuses), `GET /api/wb/fp?fp=` (decoded AD structures, variants,
+  changing byte spans, hints, search links, heard together with — other radios sharing ≥ ⅓ of the
+  5-minute slots —, suggested match, up to 60 radios), `POST /api/wb/note`, `POST /api/wb/preview`,
+  `GET /api/wb/rules`, `POST /api/wb/rule`, `DELETE /api/wb/rule/<id>`, `GET /api/wb/export`.
+- **Table `wb_notes`** in `harava.db`: `fp` (12 hex), `status` ∈ {new, investigating, identified,
+  ignore, cannot}, `note`, `updated`, `by_user`. Saving a rule from a row marks it *identified*.
+- **Local rules** — `ids/local_rules.json` (not in git, written atomically): rules saved in the
+  Workbench get the id prefix `local-`, are checked (hex fields, 4-digit / 128-bit UUID lists,
+  `name_regex` compiles, a known layer, at least one condition) and are loaded before
+  `harava_ids.json`, so they win while being tried out. `/api/ids` shows `db.local` and
+  `rules[].local`. `update.sh` copies the file with the database backups.
 - **Users and permissions** — users in their own SQLite file `harava_users.db` (tables `users`:
   username (unique, case-insensitive), first / last name, `role` ∈ {`view`, `analyze`, `admin`},
   Werkzeug scrypt `password_hash`, `active`, `must_change`, created / updated / last_login; and

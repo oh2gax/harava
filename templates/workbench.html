@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ app_name }} — workbench</title>
+<script>
+(function () {
+    try {
+        var m = localStorage.getItem('fwa_theme_mode');
+        var light = m === 'light' || ((m !== 'dark') && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+        if (light) document.documentElement.classList.add('light');
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=version) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css', v=version) }}">
+<style>
+.admin-wrap.wide { max-width: 1500px; }
+.wb-grid { display: grid; grid-template-columns: minmax(380px, 5fr) 7fr; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .wb-grid { grid-template-columns: 1fr; } }
+.wb-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.wb-tab { padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 12.5px; }
+.wb-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wb-tab b { font-weight: 700; margin-left: 4px; }
+.wb-bar { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.wb-bar input, .wb-bar select, .wb-form input, .wb-form select, .wb-form textarea { padding: 6px 8px; font-size: 13px; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; }
+.wb-bar input { flex: 1; min-width: 160px; }
+.wb-list { max-height: calc(100vh - 290px); overflow: auto; }
+.wb-item { padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12.5px; }
+.wb-item:hover { background: var(--bg-hover, rgba(127,127,127,.08)); }
+.wb-item.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.wb-item .t { font-weight: 600; color: var(--text-primary); }
+.wb-item .s { color: var(--text-secondary); margin-top: 2px; }
+.st { display: inline-block; font-size: 10.5px; border-radius: 8px; padding: 0 6px; border: 1px solid var(--border); color: var(--text-secondary); margin-right: 4px; }
+.st-investigating { color: var(--amber); border-color: var(--amber); }
+.st-identified { color: var(--green); border-color: var(--green); }
+.st-ignore, .st-cannot { opacity: .7; }
+.wb-kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 12.5px; }
+.wb-kv span { color: var(--text-secondary); }
+.wb-kv b { font-weight: 500; word-break: break-all; }
+.mono { font-family: Consolas, monospace; }
+.wb-form { display: grid; grid-template-columns: 110px 1fr; gap: 8px 10px; align-items: center; font-size: 12.5px; }
+.wb-form label { color: var(--text-secondary); }
+.wb-form textarea { font-family: Consolas, monospace; font-size: 12px; resize: vertical; }
+.wb-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+.wb-hint { font-size: 12.5px; margin: 3px 0; }
+.wb-prog { display: flex; align-items: flex-end; gap: 3px; height: 54px; margin-top: 6px; }
+.wb-prog i { flex: 1; max-width: 28px; background: var(--green); border-radius: 2px 2px 0 0; min-width: 4px; position: relative; }
+.wb-prog i u { position: absolute; left: 0; right: 0; bottom: 0; background: var(--text-muted); border-radius: 2px 2px 0 0; text-decoration: none; }
+</style>
+</head>
+<body class="admin-page">
+<div class="admin-wrap wide">
+    <div class="admin-top">
+        <a class="admin-brand" href="/">📡 {{ app_name }}</a><span class="admin-crumb">🔬 Workbench</span>
+        <span class="grow"></span>
+        <label class="note" style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="mask"> Mask addresses</label>
+        <a class="btn ghost" href="/api/wb/export">⬇ Export rules and notes</a>
+        <a class="btn ghost" href="/">← Back to {{ app_name }}</a>
+        <a class="btn ghost" href="/maintenance">⚙️ Maintenance</a>
+    </div>
+
+    <div class="card">
+        <h2>Radios Harava cannot name yet</h2>
+        <p class="note">Every Bluetooth radio of all active imports, grouped by what it advertises (without its address and the bytes that change): one row is one kind of device to find out.
+           <b>Unknown</b> has advertising data but no rule; <b>Weakly identified</b> knows only the company or matches a low-confidence rule; <b>No data</b> sends only flags.
+           Keep a status and a note, and when you know what it is, make a rule: rules made here are kept on this server in <code>ids/local_rules.json</code> (not in git) and come before the shared database.</p>
+        <div id="prog" class="note"></div>
+        <div class="wb-prog" id="progBars" title="Per day: grey = unknown or no data, green = named"></div>
+    </div>
+
+    <div class="wb-grid">
+        <div class="card">
+            <div class="wb-tabs" id="tabs"></div>
+            <div class="wb-bar">
+                <input type="search" id="q" placeholder="Search pattern, name, note…" autocomplete="off" spellcheck="false">
+                <select id="stf"><option value="">Any status</option></select>
+            </div>
+            <div class="note" id="listN"></div>
+            <div class="wb-list" id="list"><div class="empty">Loading…</div></div>
+        </div>
+        <div id="detail"><div class="card"><div class="empty">Choose a row on the left.</div></div></div>
+    </div>
+
+    <div class="card">
+        <h2>Local rules</h2>
+        <p class="note">Rules made in the Workbench on this server. Good ones can go to the shared database (<code>ids/harava_ids.json</code>): export them and add them there in a later version.</p>
+        <table class="grid"><thead><tr><th>Id</th><th>Name</th><th>Layer</th><th>Confidence</th><th>Match</th><th>Made</th><th></th></tr></thead>
+            <tbody id="rules"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody></table>
+    </div>
+</div>
+
+<script>
+const LAYERS = {{ layers|tojson }};
+const ST = { new: 'New', investigating: 'Investigating', identified: 'Identified', ignore: 'Ignore', cannot: "Can't identify" };
+const TABS = { unknown: 'Unknown', weak: 'Weakly identified', nodata: 'No data' };
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+window.S = { devices: [], own: [] };          // privacy.js masks the radios of the open row
+let tab = localStorage.getItem('harava_wb_tab') || 'unknown', DATA = null, CUR = null;
+if (!TABS[tab]) tab = 'unknown';
+
+async function call(url, opts) {
+    const r = await fetch(url, Object.assign({ cache: 'no-store' }, opts || {}));
+    if (r.status === 401) { location.href = '/login?next=/workbench'; throw new Error('sign in'); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+}
+const post = (url, body) => call(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+$('stf').innerHTML += Object.entries(ST).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+
+async function load() {
+    DATA = await call('/api/wb?tab=' + tab);
+    $('tabs').innerHTML = Object.entries(TABS).map(([k, v]) =>
+        `<button class="wb-tab${k === tab ? ' on' : ''}" data-t="${k}">${v}<b>${DATA.kinds[k]}</b></button>`).join('');
+    $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; localStorage.setItem('harava_wb_tab', tab); load(); });
+    const st = DATA.statuses || {};
+    $('prog').innerHTML = `Radios of all days: <b>${DATA.counts.unknown}</b> unknown, <b>${DATA.counts.weak}</b> weakly identified, <b>${DATA.counts.nodata}</b> with no data.
+        Notes: ${Object.entries(ST).filter(([k]) => st[k]).map(([k, v]) => `${st[k]} ${v.toLowerCase()}`).join(', ') || 'none yet'}. Local rules: ${DATA.local_rules}.`;
+    const mx = Math.max(1, ...DATA.progress.map(p => p.ble));
+    $('progBars').innerHTML = DATA.progress.map(p => `<i style="height:${100 * p.ble / mx}%" title="${p.day}: ${p.ble} BLE radios, ${p.unknown + p.nodata} unknown or no data, ${p.weak} weak">
+        <u style="height:${p.ble ? 100 * (p.unknown + p.nodata) / p.ble : 0}%"></u></i>`).join('');
+    drawList();
+}
+function drawList() {
+    const q = $('q').value.trim().toLowerCase(), sf = $('stf').value;
+    const items = DATA.items.filter(x => (!sf || x.status === sf) && (!q || `${x.label} ${x.names.join(' ')} ${x.note} ${x.ident}`.toLowerCase().includes(q)));
+    $('listN').textContent = `${items.length} kinds · ${items.reduce((a, x) => a + x.count, 0)} radios`;
+    $('list').innerHTML = items.map(x => `<div class="wb-item${CUR && CUR.item.fp === x.fp ? ' sel' : ''}" data-fp="${x.fp}">
+        <div class="t">${esc(x.label)}</div>
+        <div class="s"><span class="st st-${x.status}">${ST[x.status]}</span>${x.count} radio${x.count > 1 ? 's' : ''}${x.devices < x.count ? ` (${x.devices} devices)` : ''} · ${x.days.length} day${x.days.length > 1 ? 's' : ''} · ${x.rssi_max ?? '?'} dBm${x.names.length ? ' · ' + esc(x.names.slice(0, 3).join(', ')) : ''}${x.ident ? ' · now ' + esc(x.ident) : ''}</div>
+        ${x.note ? `<div class="s">📝 ${esc(x.note)}</div>` : ''}</div>`).join('') || '<div class="empty">Nothing here.</div>';
+    $('list').querySelectorAll('.wb-item').forEach(r => r.onclick = () => open_(r.dataset.fp));
+}
+$('q').oninput = () => drawList();
+$('stf').onchange = () => drawList();
+
+async function open_(fp) {
+    $('detail').innerHTML = '<div class="card"><div class="empty">Loading…</div></div>';
+    const r = await call('/api/wb/fp?fp=' + fp);
+    CUR = r; drawList();
+    const it = r.item;
+    window.S.devices = r.radios;
+    $('detail').innerHTML = `
+    <div class="card"><h2>${esc(it.label)}</h2>
+        <div class="wb-kv">
+            <span>Radios</span><b>${it.count} address(es), ${it.devices} device(s), ${it.hears} hears, strongest ${it.rssi_max ?? '?'} dBm${it.travelled ? `, ${it.travelled} travelled` : ''}</b>
+            <span>Days</span><b>${esc(it.days.join(', '))}</b>
+            ${it.names.length ? `<span>Names</span><b>${esc(it.names.join(', '))}</b>` : ''}
+            ${it.ident ? `<span>Now</span><b>${esc(it.ident)}</b>` : ''}
+        </div>
+        <div class="wb-row"><select id="dSt">${Object.entries(ST).map(([k, v]) => `<option value="${k}"${k === it.status ? ' selected' : ''}>${v}</option>`).join('')}</select>
+            <input id="dNote" style="flex:1;min-width:200px;padding:6px 8px;background:var(--input-bg);color:var(--text-primary);border:1px solid var(--border);border-radius:6px" value="${esc(it.note)}" placeholder="Note: what could it be?">
+            <button class="btn" id="dSave">Save</button><span class="msg" id="dMsg"></span></div>
+    </div>
+    <div class="card"><h2>The advertisement, decoded</h2><div class="wb-kv">${r.decoded.map(x => `<span>${esc(x.what)}</span><b class="mono">${esc(x.value)}</b>`).join('') || '<span>—</span><b>no advertising data</b>'}</div>
+        ${r.variants.length > 1 ? `<h3>Variants (${r.variants.length})</h3><div class="wb-kv">${r.variants.map(v => `<span>${v.count}×</span><b class="mono">${esc(v.raw)}</b>`).join('')}</div>
+        ${r.changing.length ? `<p class="note" style="margin-top:6px">Bytes that change between radios: ${esc(r.changing.join(', '))} (counted from 0 in the raw data).</p>` : ''}` : ''}
+    </div>
+    <div class="card"><h2>Hints</h2>${r.hints.map(h => `<div class="wb-hint">• ${esc(h)}</div>`).join('') || '<div class="note">No hints.</div>'}
+        <div class="wb-row">${r.search.map(s => `<a class="btn ghost" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label)} ↗</a>`).join('')}</div>
+        <h3>Heard together with</h3>${r.together.map(t => `<div class="wb-hint">${t.n} × ${esc(t.what)}</div>`).join('') || '<div class="note">Nothing stands out.</div>'}
+    </div>
+    <div class="card"><h2>Make a rule</h2>
+        <div class="wb-form">
+            <label>Name</label><input id="rName" maxlength="80" placeholder="e.g. Nexo smart lock" value="${esc(it.names[0] || '')}">
+            <label>Layer</label><select id="rLayer"><option value="">(none: name only)</option>${LAYERS.map(l => `<option>${esc(l)}</option>`).join('')}</select>
+            <label>Confidence</label><select id="rConf"><option value="high">high: the protocol says so</option><option value="medium">medium: typical, well known</option><option value="low" selected>low: a likely guess</option></select>
+            <label>Match</label><textarea id="rMatch" rows="5" spellcheck="false">${esc(JSON.stringify(r.suggest, null, 1))}</textarea>
+            <label>Note</label><textarea id="rNote" rows="2" style="font-family:inherit" placeholder="What tells it, and where the information came from"></textarea>
+        </div>
+        <p class="note" style="margin-top:8px">The match is a suggestion of what these radios share. Keys: <code>mfg</code>, <code>mfg_data_prefix</code>, <code>service_data_uuid</code>, <code>service_uuid_any</code>, <code>uuid128_any</code>, <code>ad_type</code>, <code>ad_data_prefix</code>, <code>name_regex</code> (all given must hold).</p>
+        <div class="wb-row"><button class="btn ghost" id="rPrev">Preview</button><button class="btn" id="rSave">Save rule</button></div>
+        <div class="msg" id="rOut"></div>
+    </div>
+    <div class="card"><h2>Radios (${r.radios.length}${it.count > r.radios.length ? ' of ' + it.count : ''})</h2>
+        <table class="grid"><thead><tr><th>Address</th><th>Name</th><th>dBm</th><th>Hears</th><th>Days</th><th></th></tr></thead><tbody>
+        ${r.radios.map(d => `<tr><td class="mono">${esc(d.mac)}</td><td>${esc(d.name)}</td><td>${d.rssi_max ?? ''}</td><td>${d.hears}</td><td>${esc(d.days.join(', '))}</td><td>${d.travelled ? 'travelled' : ''}</td></tr>`).join('')}
+        </tbody></table></div>`;
+    if (window.haravaMask) window.haravaMask.refresh();
+    $('dSave').onclick = async () => {
+        try { await post('/api/wb/note', { fp: it.fp, status: $('dSt').value, note: $('dNote').value }); $('dMsg').className = 'msg ok'; $('dMsg').textContent = 'Saved';
+              const x = DATA.items.find(y => y.fp === it.fp); if (x) { x.status = $('dSt').value; x.note = $('dNote').value; } drawList(); }
+        catch (e) { $('dMsg').className = 'msg err'; $('dMsg').textContent = e.message; }
+    };
+    const body = () => {
+        let match; try { match = JSON.parse($('rMatch').value); } catch (_) { throw new Error('The match is not valid JSON.'); }
+        return { fp: it.fp, name: $('rName').value, layer: $('rLayer').value, confidence: $('rConf').value, note: $('rNote').value, match };
+    };
+    $('rPrev').onclick = async () => {
+        try {
+            const p = await post('/api/wb/preview', body()), t = p.by_tab || {};
+            $('rOut').className = 'msg';
+            $('rOut').innerHTML = `Would match <b>${p.matches}</b> radio(s) of ${p.kinds} kind(s): ${t.unknown || 0} unknown, ${t.weak || 0} weak, ${t.nodata || 0} no data, ${t.identified || 0} already identified.` +
+                (p.already.length ? `<br><span style="color:var(--amber)">Would come before: ${p.already.map(a => esc(a.ident) + ' (' + a.n + ')').join(', ')}</span>` : '') +
+                (p.examples.length ? `<br><span class="note">e.g. ${p.examples.map(e => esc(e.name || e.mac) + ' — ' + esc(e.label)).join('; ')}</span>` : '');
+            if (window.haravaMask) window.haravaMask.refresh();
+        } catch (e) { $('rOut').className = 'msg err'; $('rOut').textContent = e.message; }
+    };
+    $('rSave').onclick = async () => {
+        try {
+            const p = await post('/api/wb/rule', body());
+            $('rOut').className = 'msg ok'; $('rOut').textContent = `Saved as ${p.id}; ${p.rules} rules in use.`;
+            loadRules(); load();
+        } catch (e) { $('rOut').className = 'msg err'; $('rOut').textContent = e.message; }
+    };
+}
+
+async function loadRules() {
+    const r = await call('/api/wb/rules');
+    $('rules').innerHTML = r.rules.map(x => `<tr><td class="mono">${esc(x.id)}</td><td>${esc(x.name)}</td><td>${esc(x.layer || '—')}</td><td>${esc(x.confidence)}</td>
+        <td class="mono" style="font-size:11.5px">${esc(Object.entries(x.match).filter(([k]) => k !== 'kind').map(([k, v]) => k + '=' + (Array.isArray(v) ? v.join(',') : v)).join(' · '))}</td>
+        <td>${esc((x.created || '').replace('T', ' ').slice(0, 16))}</td>
+        <td class="actions"><button class="btn danger" data-id="${esc(x.id)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">No local rules yet.</td></tr>';
+    $('rules').querySelectorAll('button[data-id]').forEach(b => b.onclick = async () => {
+        if (!confirm(`Remove the local rule ${b.dataset.id}?`)) return;
+        await call('/api/wb/rule/' + encodeURIComponent(b.dataset.id), { method: 'DELETE' });
+        loadRules(); load();
+    });
+}
+load().catch(e => { $('list').innerHTML = `<div class="empty">${esc(e.message)}</div>`; });
+loadRules();
+document.addEventListener('DOMContentLoaded', () => { const cb = $('mask'); if (window.haravaMask) { cb.checked = window.haravaMask.on; cb.onchange = () => window.haravaMask.set(cb.checked); } });
+</script>
+<script src="{{ url_for('static', filename='privacy.js', v=version) }}"></script>
+</body>
+</html>
