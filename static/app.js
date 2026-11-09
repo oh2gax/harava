@@ -433,9 +433,11 @@ function drawTimeline() {
     const tl = S.timeline;
     const binTxt = { 600000: '10 min', 3600000: 'hour', 86400000: 'day' }[tl.bin_ms] || '';
     $('tlBin').textContent = binTxt;
-    $('tlNote').innerHTML = (S.tlCat
-        ? (tl.hears ? `${tl.hears} hear(s)` : `<span style="color:var(--amber)">none heard in this range</span>`) : '') +
-        (tl.sit_only ? ` <span title="Radios that only the Sit export has (the log missed them). They are counted once, when first heard.">· ${tl.sit_only} only in Sit</span>` : '');
+    $('tlNote').innerHTML = [
+        S.tlCat ? (tl.hears ? `${tl.hears} hear(s)` : `<span style="color:var(--amber)">none heard in this range</span>`) : '',
+        tl.sit_only ? `<span title="Radios that only the Sit export has (the log missed them). They are counted once, when first heard.">${tl.sit_only} only in Sit</span>` : '',
+        btGapNote(tl),
+    ].filter(Boolean).join(' · ');
     $('timelinePanel').classList.toggle('tl-filtered', !!S.tlCat);
     const withDate = tl.bin_ms >= 86400000 || wideRange();
     const labels = tl.bins.map(b => {
@@ -453,7 +455,9 @@ function drawTimeline() {
     };
     const opts = {
         responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { labels: { color: txt, boxWidth: 10, font: { size: 10 } } }, tooltip: { mode: 'index', intersect: false } },
+        plugins: { legend: { labels: { color: txt, boxWidth: 10, font: { size: 10 } } },
+                   tooltip: { mode: 'index', intersect: false, callbacks: { footer: items => items.length ? btGapFooter(tl, items[0].dataIndex) : '' } },
+                   btGaps: { tl, color: cssVar('--amber') } },
         scales: {
             x: { stacked: true, ticks: { color: txt, maxTicksLimit: 18, font: { size: 10 } }, grid: { color: grid } },
             y: { stacked: true, ticks: { color: txt, font: { size: 10 } }, grid: { color: grid }, title: { display: true, text: 'hears', color: txt, font: { size: 10 } } },
@@ -468,7 +472,7 @@ function drawTimeline() {
         },
     };
     if (tlChart) { tlChart.data = data; tlChart.options = opts; tlChart.update(); }
-    else tlChart = new Chart($('tlChart'), { data, options: opts });
+    else tlChart = new Chart($('tlChart'), { data, options: opts, plugins: [BT_GAP_PLUGIN] });
 }
 
 // ─────────────── device detail ───────────────

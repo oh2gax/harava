@@ -39,6 +39,50 @@ function fmtTime(ms, withDate) {
     return withDate ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${t}` : t;
 }
 function fmtM(m) { return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m'; }
+function fmtDur(ms) { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${pad(m % 60)} min` : `${m} min`; }
+
+// Bluetooth coverage on the timeline (/api/timeline → bt_gaps, bt_cov). When the screen goes dark,
+// many phones (Samsung above all) park the Bluetooth scan while Wi-Fi goes on: those stretches are
+// shaded, because "nothing heard" there does not mean nothing was there.
+const BT_GAP_TITLE = 'Stretches of at least 3 min where the log has Wi-Fi rows but no Bluetooth rows: the phone ' +
+    'paused its Bluetooth scan (usually the screen was off). Bluetooth radios there were not heard. ' +
+    "Keep Fieldwatch in front with 'Keep screen on' to avoid it.";
+function btGapNote(tl) {
+    const g = (tl && tl.bt_gaps) || [], c = (tl && tl.bt_cov) || {};
+    if (!g.length) return '';
+    const pct = c.logged_ms ? Math.round(100 * c.silent_ms / c.logged_ms) : null;
+    const tip = `${BT_GAP_TITLE}\n\n${g.length} stretch(es), ${fmtDur(c.silent_ms)}` +
+        (pct != null ? ` = ${pct} % of the time the log was running (${fmtDur(c.logged_ms)}).` : '.');
+    return `<span class="bt-gap-note" title="${esc(tip)}">▨ Bluetooth paused ${fmtDur(c.silent_ms)}${pct != null ? ` (${pct} %)` : ''}</span>`;
+}
+function btGapsIn(tl, t0, t1) { return ((tl && tl.bt_gaps) || []).filter(g => g.to > t0 && g.from < t1); }
+function btGapFooter(tl, binIndex) {
+    const b = tl && tl.bins[binIndex];
+    if (!b) return '';
+    return btGapsIn(tl, b.t, b.t + tl.bin_ms).map(g =>
+        `Bluetooth paused ${fmtTime(g.from).slice(0, 5)}–${fmtTime(g.to).slice(0, 5)}${g.phone ? ' (' + g.phone + ')' : ''}`).join('\n');
+}
+// Chart.js plugin: shades the stretches under the bars. Options: plugins.btGaps = { tl, color }.
+const BT_GAP_PLUGIN = {
+    id: 'btGaps',
+    beforeDatasetsDraw(chart, args, opts) {
+        const tl = opts && opts.tl;
+        if (!tl || !tl.bins || !tl.bins.length || !(tl.bt_gaps || []).length) return;
+        const x = chart.scales.x, area = chart.chartArea, ctx = chart.ctx;
+        const t0 = tl.bins[0].t, t1 = tl.bins[tl.bins.length - 1].t + tl.bin_ms;
+        const px = t => x.left + (Math.min(Math.max(t, t0), t1) - t0) / (t1 - t0) * (x.right - x.left);
+        ctx.save();
+        for (const g of tl.bt_gaps) {
+            const a = px(g.from), b = px(g.to);
+            if (b - a < 0.5) continue;
+            ctx.globalAlpha = 0.15; ctx.fillStyle = opts.color || '#f59e0b';
+            ctx.fillRect(a, area.top, b - a, area.bottom - area.top);
+            ctx.globalAlpha = 0.8;
+            ctx.fillRect(a, area.top, Math.max(b - a, 1), 3);
+        }
+        ctx.restore();
+    },
+};
 
 // My devices: a rule matches a radio by address, address start, name or part of the name
 const OWN_MATCH_TXT = { mac: 'Address is', mac_prefix: 'Address starts with', name: 'Name is', name_contains: 'Name contains' };

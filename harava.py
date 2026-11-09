@@ -16,6 +16,7 @@ Remember when reading the data: every latitude / longitude in a Fieldwatch log
 is where THIS PHONE was when it heard the radio, not where the radio is.
 """
 
+import bisect
 import configparser
 import csv
 import gzip
@@ -2079,6 +2080,13 @@ def _app_build():
     return str(newest)
 
 
+@app.context_processor
+def _static_build():
+    # every page stamps its CSS and scripts with the build (the newest change of templates and static
+    # files), so a browser fetches them again after each deploy, not only when the day's version changes
+    return {"build": _app_build()}
+
+
 @app.route("/app")
 def app_page():
     return render_template("app.html", app_name=APP_NAME, version=APP_VERSION, build=_app_build(),
@@ -2196,12 +2204,76 @@ def api_path():
     return jsonify({"parts": parts})
 
 
+# Bluetooth coverage. On many phones (Samsung above all) Android parks the Bluetooth scan when the
+# screen goes dark, while Wi-Fi scanning goes on: the log then has Wi-Fi rows and no Bluetooth rows.
+# A running scan writes a Bluetooth row about every second at home (99 % of gaps < 10 s), so a
+# stretch of BT_GAP_MIN_MS without any, while Wi-Fi rows keep coming, means the scan was paused --
+# "nothing heard" there does not mean nothing was there. Checked against a Sit on 9 Nov 2026:
+# new Bluetooth radios appeared 20 times less often inside such stretches than outside them.
+BT_GAP_MIN_MS = 3 * 60000          # shortest silence that is marked
+BT_GAP_HOLE_MS = 10 * 60000        # no Wi-Fi either for this long = the log itself stopped: not marked
+BT_GAP_MIN_WIFI = 3                # Wi-Fi rows needed inside a stretch to show the scanner was running
+BT_GAP_JOIN_MS = 60000             # stretches this close are one (a restart can let a few rows through)
+
+
+def bluetooth_gaps(hears):
+    """Stretches where the log has Wi-Fi rows but no Bluetooth rows, per phone.
+    Returns ({"from", "to", "wifi", "collector"} list, logged_ms per collector)."""
+    per = defaultdict(lambda: ([], []))
+    for h in hears:
+        if h["src"] == "sit":
+            continue
+        bt, wf = per[h.get("collector_id") or 0]
+        (bt if h["kind"] == "BLE" else wf).append(h["ts"])
+    gaps, logged = [], {}
+    for cid, (bt, wf) in per.items():
+        bt.sort(); wf.sort()
+        every = sorted(bt + wf)
+        logged[cid] = sum(min(b - a, BT_GAP_HOLE_MS) for a, b in zip(every, every[1:]) if b - a <= BT_GAP_HOLE_MS)
+        if not wf:
+            continue
+        edges = [every[0]] + bt + [every[-1]]
+        mine = []
+        for a, b in zip(edges, edges[1:]):
+            if b - a < BT_GAP_MIN_MS:
+                continue
+            w = wf[bisect.bisect_right(wf, a):bisect.bisect_left(wf, b)]
+            if len(w) < BT_GAP_MIN_WIFI:
+                continue
+            # split where Wi-Fi stops too (phone off, log paused): only the part with Wi-Fi counts
+            pieces, start, prev = [], a, a
+            for t in w:
+                if t - prev > BT_GAP_HOLE_MS:
+                    pieces.append((start, prev))
+                    start = t
+                prev = t
+            pieces.append((start, b if b - prev <= BT_GAP_HOLE_MS else prev))
+            for p0, p1 in pieces:
+                n = sum(1 for t in w if p0 <= t <= p1)
+                if p1 - p0 >= BT_GAP_MIN_MS and n >= BT_GAP_MIN_WIFI:
+                    if mine and p0 - mine[-1]["to"] <= BT_GAP_JOIN_MS:
+                        mine[-1]["to"] = p1
+                        mine[-1]["wifi"] += n
+                    else:
+                        mine.append({"from": p0, "to": p1, "wifi": n, "collector": cid})
+        gaps += mine
+    gaps.sort(key=lambda g: g["from"])
+    return gaps, logged
+
+
 @app.route("/api/timeline")
 def api_timeline():
     t_from, t_to = range_args()
     cat = request.args.get("cat") or ""
     with db() as con:
         hears = query_hears(con, t_from, t_to)
+        names = {r["id"]: r["name"] for r in con.execute("SELECT id, name FROM collectors")}
+    # Bluetooth coverage is worked out from all radios, before the "Show" filter below
+    gaps, logged = bluetooth_gaps(hears)
+    several = len(logged) > 1
+    bt_gaps = [dict(g, phone=names.get(g["collector"], "") if several else "") for g in gaps]
+    bt_cov = {"silent_ms": sum(g["to"] - g["from"] for g in gaps), "logged_ms": sum(logged.values()),
+              "min_gap_ms": BT_GAP_MIN_MS}
     all_lo = hears[0]["ts"] if hears else None
     all_hi = hears[-1]["ts"] + 1 if hears else None
     if cat:
@@ -2216,7 +2288,7 @@ def api_timeline():
     lo = t_from or all_lo
     hi = t_to or all_hi
     if lo is None or hi is None:
-        return jsonify({"bin_ms": 0, "bins": [], "cat": cat, "hears": 0})
+        return jsonify({"bin_ms": 0, "bins": [], "cat": cat, "hears": 0, "bt_gaps": [], "bt_cov": bt_cov})
     span = hi - lo
     bin_ms = 600000 if span <= 2 * 86400000 else (3600000 if span <= 14 * 86400000 else 86400000)
     start = lo - lo % bin_ms
@@ -2236,7 +2308,8 @@ def api_timeline():
         v = bins.get(t, {"WIFI": 0, "BLE": 0, "new": 0})
         out.append({"t": t, **v})
         t += bin_ms
-    return jsonify({"bin_ms": bin_ms, "bins": out, "cat": cat, "hears": len(hears), "sit_only": sit_only})
+    return jsonify({"bin_ms": bin_ms, "bins": out, "cat": cat, "hears": len(hears), "sit_only": sit_only,
+                    "bt_gaps": bt_gaps, "bt_cov": bt_cov})
 
 
 @app.route("/api/device")

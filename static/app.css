@@ -300,6 +300,7 @@ table.grid tbody tr.mine td { color: var(--text-secondary); }
 /* timeline "Show" selector */
 .tl-cat { width: auto; padding: 1px 6px; font-size: 11px; text-transform: none; letter-spacing: 0; margin-left: 6px; }
 .tl-note { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--text-secondary); }
+.bt-gap-note { color: var(--amber); cursor: help; white-space: nowrap; }
 #timelinePanel.tl-filtered { border-color: var(--accent-dim); }
 
 /* ── What's new / User guides / About (as in WSPR Logger) ── */

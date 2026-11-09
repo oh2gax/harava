@@ -496,8 +496,8 @@
     const bin = { 600000: '10 min', 3600000: 'hour', 86400000: 'day' }[tl.bin_ms] || '';
     $('m-tl-t').textContent = `Hears per ${bin || '10 min'}`;
     $('m-tl-sub').textContent = O.tlcat ? O.tlcat + ' only' : '';
-    $('m-tl-note').innerHTML = (O.tlcat ? (tl.hears ? `${tl.hears} hear(s)` : '<span style="color:var(--amber)">none heard</span>') : '') +
-      (tl.sit_only ? ` · ${tl.sit_only} only in Sit` : '');
+    $('m-tl-note').innerHTML = [O.tlcat ? (tl.hears ? `${tl.hears} hear(s)` : '<span style="color:var(--amber)">none heard</span>') : '',
+      tl.sit_only ? `${tl.sit_only} only in Sit` : '', btGapNote(tl)].filter(Boolean).join(' · ');
     const labels = tl.bins.map(b => { const d = new Date(b.t); return tl.bin_ms >= 86400000 ? `${pad(d.getDate())}.${pad(d.getMonth() + 1)}` : `${pad(d.getHours())}:${pad(d.getMinutes())}`; });
     const ax = axis();
     mkChart('m-tl-c', {
@@ -506,7 +506,10 @@
         { type: 'bar', label: 'Bluetooth', data: tl.bins.map(b => b.BLE), backgroundColor: 'rgba(74,222,128,.75)', stack: 's', yAxisID: 'y' },
         { type: 'line', label: 'New', data: tl.bins.map(b => b.new), borderColor: cssVar('--accent'), borderWidth: 1.5, pointRadius: 0, tension: .3, yAxisID: 'y2' },
       ] },
-      options: { plugins: { legend: { labels: { color: cssVar('--text-secondary'), boxWidth: 10, font: { size: 10 } } }, tooltip: { mode: 'index', intersect: false } },
+      plugins: [BT_GAP_PLUGIN],
+      options: { plugins: { legend: { labels: { color: cssVar('--text-secondary'), boxWidth: 10, font: { size: 10 } } },
+                            tooltip: { mode: 'index', intersect: false, callbacks: { footer: items => items.length ? btGapFooter(tl, items[0].dataIndex) : '' } },
+                            btGaps: { tl, color: cssVar('--amber') } },
         scales: { x: Object.assign(ax, { stacked: true, ticks: Object.assign(ax.ticks, { maxTicksLimit: 8 }) }), y: Object.assign(axis(), { stacked: true }),
                   y2: Object.assign(axis(), { position: 'right', grid: { display: false } }) } },
     });

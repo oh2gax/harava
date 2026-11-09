@@ -8,6 +8,27 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
 
 ## [2026-11-09]
 
+### Added
+- **Bluetooth coverage on the timeline.** `bluetooth_gaps()` finds, per phone, stretches of at least
+  3 min (`BT_GAP_MIN_MS`) where the log has Wi-Fi rows but no Bluetooth rows, with at least 3 Wi-Fi
+  rows inside (`BT_GAP_MIN_WIFI`); a stretch where Wi-Fi also stops for 10 min (`BT_GAP_HOLE_MS`) is
+  the log being off and is not marked; stretches less than 60 s apart are joined (`BT_GAP_JOIN_MS`).
+  `/api/timeline` returns `bt_gaps` (from, to, wifi, collector, phone) and `bt_cov` (silent_ms,
+  logged_ms, min_gap_ms), worked out from all radios before the *Show* filter. The full page and the
+  phone app shade the stretches (Chart.js plugin `BT_GAP_PLUGIN` in `common.js`), show
+  *▨ Bluetooth paused h min (%)* with an explanation, and name the stretch in the bar tooltip.
+  Reason: on Samsung phones Android parks the Bluetooth scan when the screen goes dark; a running
+  scan writes a Bluetooth row about every second (99 % of gaps < 10 s), and in the author's data of
+  8–9 Nov 2026 Bluetooth was paused 70–80 % of the logged time. Checked against a Sit: new Bluetooth
+  radios appeared 20 times less often inside the marked stretches (0.4/min) than outside (8.5/min).
+- User guide 1.4 (*Keep the screen on for Bluetooth*, *Bluetooth paused* with a figure, limitation,
+  quick reference) and Mobile guide 1.3 (Day view, troubleshooting).
+
+### Changed
+- All pages stamp their CSS and scripts with the build (the newest change of templates and static
+  files, a context processor), not the day's version: browsers fetch the new files after every
+  deploy without Ctrl+F5.
+
 ### Changed
 - **Data store (schema 2, `PRAGMA user_version = 2`)** — `hears` holds every hear once per phone:
   `collector_id` + `dkey` UNIQUE (`L<ts>|kind|mac|rssi` for log rows, `K…` for KML rows,

@@ -16,8 +16,8 @@
     } catch (e) {}
 })();
 </script>
-<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=version) }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin.css', v=version) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=build) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css', v=build) }}">
 </head>
 <body class="role-{{ user.role }}">
 
@@ -291,10 +291,10 @@
     </div>
 </div>
 <script>window.FWA = { open: {{ (user.open or false)|tojson }}, role: {{ user.role|tojson }}, appName: {{ app_name|tojson }}, version: {{ version|tojson }}, travelMin: {{ travel_min_m }}, cartoApiKey: {{ carto_api_key|tojson }} };</script>
-<script src="{{ url_for('static', filename='common.js', v=version) }}"></script>
-<script src="{{ url_for('static', filename='app.js', v=version) }}"></script>
-<script src="{{ url_for('static', filename='info.js', v=version) }}"></script>
-<script src="{{ url_for('static', filename='privacy.js', v=version) }}"></script>
+<script src="{{ url_for('static', filename='common.js', v=build) }}"></script>
+<script src="{{ url_for('static', filename='app.js', v=build) }}"></script>
+<script src="{{ url_for('static', filename='info.js', v=build) }}"></script>
+<script src="{{ url_for('static', filename='privacy.js', v=build) }}"></script>
 <script>try { document.getElementById('lMask').checked = window.haravaMask.on; } catch (e) {}</script>
 </body>
 </html>
