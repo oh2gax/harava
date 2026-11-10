@@ -302,12 +302,12 @@ Every device class in Fieldwatch's signature catalogue is its own map layer, wit
 
 | Group | Layers |
 |-------|--------|
-| **Watch list** (icon pins) | 🕶️ **Glasses & VR** (Ray-Ban / Meta, Even G1, Snap Spectacles, Vuzix, RayNeo, Brilliant Frame, and VR headsets such as Meta Quest) · 🏷️ **Tracker** (AirTag / Find My accessories — iPhones, iPads and Macs that send Find My are moved to Phone / PC — Find Hub, DULT, SmartTag, Tile, Chipolo, Pebblebee) · 🎥 **Surveillance** · 🚓 **Police / body cam** · 🚁 **Drone** · 💀 **Hacking tool** |
-| **Personal** | Phone / PC · Audio · Wearable · Health |
+| **Watch list** (icon pins) | 🕶️ **Glasses & VR** (Ray-Ban / Meta, Even G1, Snap Spectacles, Vuzix, RayNeo, Brilliant Frame, and VR headsets such as Meta Quest) · 🏷️ **Tracker** (AirTag / Find My accessories — iPhones, iPads and Macs that send Find My are moved to Apple device — Find Hub, DULT, SmartTag, Tile, Chipolo, Pebblebee) · 🎥 **Surveillance** · 🚓 **Police / body cam** · 🚁 **Drone** · 💀 **Hacking tool** |
+| **Personal** | Phone / PC · Apple device · Android / Google · Samsung · Windows PC · Audio · Wearable · Health |
 | **Places & things** | Vehicle · EV charger · Camera · Smart lock · Home & IoT · TV & media · Printer · Sensor · Thermostat · Shelf label / sign · Beacon · Mesh radio · Two-way radio |
 | **Background** | Network (Wi-Fi access points) · Unidentified |
 
-*EV charger*, *TV & media*, *Printer* and *Sensor* are Harava's own layers: Fieldwatch files such radios under Home & IoT. Harava moves them by signature name (`SIG_LAYER` in `harava.py`) and by its own rules (`ids/harava_ids.json`), which also catch a TV's or a printer's own Wi-Fi Direct network.
+*EV charger*, *TV & media*, *Printer* and *Sensor* are Harava's own layers: Fieldwatch files such radios under Home & IoT. So are *Apple device*, *Android / Google*, *Samsung* and *Windows PC*, which Fieldwatch files under one class of phones and computers (Phone / PC keeps the rest: phone hotspots, Fast Pair accessories). Harava moves them by signature name (`SIG_LAYER` in `harava.py`) and by its own rules (`ids/harava_ids.json`), which also catch a TV's or a printer's own Wi-Fi Direct network.
 
 **Glasses & VR** share one layer, because Meta uses the same Bluetooth ID for its Ray-Ban glasses and its Quest headsets; a name such as *Quest*, *Oculus*, *Pico*, *Vive* or *Vision Pro* adds a **VR?** tag. For trackers Harava reads from the raw data whether the tag is **separated** from its owner or **near owner**; for Ruuvi tags it decodes temperature, humidity, pressure and battery.
 

@@ -57,6 +57,16 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
   of an unidentified Bluetooth radio). On 8–10 Nov: Home & IoT 111 devices → 26; TV & media 41,
   EV charger 28, Printer 26, Sensor 7. Per day Home & IoT is 8, 13 and 8 devices.
 
+- **Phone / PC split.** Four more layers in `EXTRA_LAYERS`: **Apple device**, **Android / Google**,
+  **Samsung**, **Windows PC** (Personal). `SIG_LAYER`: Apple Device → Apple device, Google →
+  Android / Google, Microsoft Device → Windows PC (Fast Pair and Phone hotspot stay on Phone / PC).
+  Identification database 2026-11-10.2: the layers of the `apple-*` phone rules, `google-*`,
+  `oneplus`, `samsung-*`, `microsoft`, `name-windows-pc` and `windows-3e1d` changed; the Find My
+  identifications of Apple devices go to Apple device. `PHONE_LAYERS` (harava.py, common.js) lists
+  the five phone layers; `phoneType()` of the Phone check uses it, so the check counts the same
+  radios as before. On 8–10 Nov: Android / Google 1,505 addresses, Apple device 846, Windows PC 588,
+  Samsung 128, Phone / PC 21.
+
 ### Fixed
 - **Fieldwatch 1.1.43 logs.** From 1.1.43 (9 Nov 2026) the log's `raw` field is the whole
   advertisement also when the row has manufacturer data; before, it was the manufacturer data.

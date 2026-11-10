@@ -3,7 +3,9 @@
 'use strict';
 
 // Device layers: one per Fieldwatch signature class (names match CLASS_CATEGORY in the server), plus
-// Harava's own splits of Home & IoT (EXTRA_LAYERS in the server: TV & media, EV charger, Printer, Sensor).
+// Harava's own splits (EXTRA_LAYERS in the server): of Home & IoT (TV & media, EV charger, Printer, Sensor)
+// and of Phone / PC (Apple device, Android / Google, Samsung, Windows PC).
+const PHONE_LAYERS = ['Phone / PC', 'Apple device', 'Android / Google', 'Samsung', 'Windows PC'];
 // Watch-list layers get an icon pin on the map so they stand out from the dots.
 const CAT = [
     ['Watch list', 'Glasses & VR', '#e879f9', '🕶️'],
@@ -13,6 +15,10 @@ const CAT = [
     ['Watch list', 'Drone', '#fb923c', '🚁'],
     ['Watch list', 'Hacking tool', '#d946ef', '💀'],
     ['Personal', 'Phone / PC', '#38bdf8'],
+    ['Personal', 'Apple device', '#0ea5e9'],
+    ['Personal', 'Android / Google', '#22c55e'],
+    ['Personal', 'Samsung', '#1d4ed8'],
+    ['Personal', 'Windows PC', '#ea580c'],
     ['Personal', 'Audio', '#a78bfa'],
     ['Personal', 'Wearable', '#c084fc'],
     ['Personal', 'Health', '#f472b6'],
@@ -137,7 +143,7 @@ function groupSame(list) {
 // ── Phone check (classroom): which radios count as phones, and where the box limit goes ──
 function phoneType(d, opts) {
     if (d.kind !== 'BLE') return null;
-    if (!['Phone / PC', 'Unidentified'].includes(d.category)) return null;
+    if (!PHONE_LAYERS.includes(d.category) && d.category !== 'Unidentified') return null;
     // a phone's Find My message comes from a second address: the phone is counted by its other messages
     if ((d.ident_id || '').startsWith('findmy-')) return null;
     const f = d.fleets || '', n = (d.name || '').toLowerCase();

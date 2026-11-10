@@ -290,7 +290,7 @@ Each radio has \textbf{one pin}, at the place where your phone heard it \emph{lo
 \end{itemize}
 Hover over a pin for its name, layer, signal and hears; click it for its details.
 
-\fig{g_trackers.jpg}{0.9}{Only the \emph{Tracker} layer, zoomed in at home, after Harava moved the iPhones, iPads and Macs to the Phone / PC layer (29 addresses left of Fieldwatch's 143). Each tag icon is one tracker address heard during the day. All were weak and heard once or twice --- neighbours' tags and passers-by, nothing that followed the phone.}
+\fig{g_trackers.jpg}{0.9}{Only the \emph{Tracker} layer, zoomed in at home, after Harava moved the iPhones, iPads and Macs to the Apple device layer (29 addresses left of Fieldwatch's 143). Each tag icon is one tracker address heard during the day. All were weak and heard once or twice --- neighbours' tags and passers-by, nothing that followed the phone.}
 
 \subsection{The timeline}\label{sec:timeline}
 \fig{g_timeline.jpg}{0.95}{Hears per 10 minutes: Wi-Fi (blue) and Bluetooth (green) bars, and the number of new radios (line, right scale). The busy peaks around 08:00--11:00 are at home; the drives show as short bursts of many new radios.}
@@ -367,7 +367,9 @@ Watch list & Glasses \& VR & Ray-Ban / Meta, Even G1, Snap Spectacles, Vuzix, Ra
  & Drone & DJI, Autel, Parrot, Remote ID\\
  & Hacking tool & Flipper Zero, Hak5 Pineapple, Pwnagotchi\\
 \midrule
-Personal & Phone / PC & Apple devices, Google, Microsoft (Windows PCs), Fast Pair, phone hotspots\\
+Personal & Apple device, Android / Google & iPhones, iPads, Macs; Android phones and other Google devices, OnePlus\\
+ & Samsung, Windows PC & Galaxy phones, tablets and watches; Windows computers\\
+ & Phone / PC & what is left: phone hotspots, Fast Pair accessories\\
  & Audio, Wearable, Health & earbuds and speakers; watches, rings, pendants; Dexcom, Omron\\
 \midrule
 Places \& things & Vehicle, EV charger & Tesla, Audi MMI, BMW, CarPlay, tyre-pressure sensors; EV charge points\\
@@ -381,7 +383,7 @@ Background & Network & Wi-Fi access points and routers\\
  & Unidentified & no signature matched: most random Bluetooth addresses\\
 \bottomrule
 \end{tabularx}
-\caption{The device layers. A radio that matches several signatures goes to the layer highest in this list (a tracker before a phone). \emph{EV charger}, \emph{TV \& media}, \emph{Printer} and \emph{Sensor} are Harava's own: Fieldwatch files such radios under Home \& IoT.}
+\caption{The device layers. A radio that matches several signatures goes to the layer highest in this list (a tracker before a phone). \emph{EV charger}, \emph{TV \& media}, \emph{Printer} and \emph{Sensor} are Harava's own: Fieldwatch files such radios under Home \& IoT. So are \emph{Apple device}, \emph{Android / Google}, \emph{Samsung} and \emph{Windows PC}, which Fieldwatch files under one class of phones and computers.}
 \end{table}
 
 \infobox{Glasses \& VR.}{Smart glasses and VR headsets share one layer, because Meta uses the same Bluetooth identity for its Ray-Ban glasses and its Quest headsets; Fieldwatch's \emph{Ray-Ban / Meta glasses} signature matches both. When the name says \emph{Quest}, \emph{Oculus}, \emph{Pico}, \emph{Vive} or \emph{Vision Pro}, Harava adds a \textbf{VR?} tag and a note. Glasses usually advertise without a name. On 8 November the only hit was ``Quest 3'', heard once at $-96$\dBm\ when leaving home --- most likely a neighbour's headset.}
@@ -508,7 +510,7 @@ The data, the CSV export and the database are not changed, and \ui{Add} in My de
 
 \lead{An ``AirTag'' is usually an iPhone.} Every device of Apple's Find My network sends the same kind of message: AirTags, but also iPhones, iPads and Macs (so that they can be found), AirPods, and other makers' Find My items. Fieldwatch's \emph{Apple AirTags} signature matches the message itself, so most of its ``AirTags'' are phones and computers --- in the author's data of 8--10 November, 320 of 352. One byte of the message tells the kind of device, and Harava reads it:
 \begin{itemize}[leftmargin=1.2em]
-\item \textbf{Apple device (Find My)} and \textbf{Apple device, offline (Find My)} --- an iPhone, iPad or Mac; moved to the \emph{Phone / PC} layer. \emph{Offline} is the full-key message of a device without a network connection (asleep, switched off or lost);
+\item \textbf{Apple device (Find My)} and \textbf{Apple device, offline (Find My)} --- an iPhone, iPad or Mac; moved to the \emph{Apple device} layer. \emph{Offline} is the full-key message of a device without a network connection (asleep, switched off or lost);
 \item \textbf{AirPods or Beats (Find My)} --- moved to the \emph{Audio} layer;
 \item \textbf{Apple AirTag} and \textbf{Find My accessory or newer AirTag} --- stay on the \emph{Tracker} layer. An accessory is another maker's item with Find My (key finder, bag, bike) or a 2nd-generation AirTag; the message alone cannot tell which;
 \item \textbf{Apple Find My device, kind not known} --- a radio that only a Sit export has: a Sit carries no advertisement, so the byte cannot be read. It stays on the Tracker layer, but most such radios are iPhones too. Run the log together with the Sit.

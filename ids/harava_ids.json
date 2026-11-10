@@ -1,6 +1,6 @@
 {
   "name": "Harava identification database",
-  "version": "2026-11-10.1",
+  "version": "2026-11-10.2",
   "description": "Harava's own rules for radios that Fieldwatch's signatures leave unidentified. Rules are tried in order; the first that matches wins. A rule only changes the layer of a radio that Fieldwatch did not identify; for the others it adds the 'Identified as' text. Company names come from bt_assigned_numbers.json (Bluetooth SIG).",
   "schema": {
     "match (all given conditions must hold)": {
@@ -24,7 +24,7 @@
     {
       "id": "name-windows-pc",
       "name": "Windows PC",
-      "layer": "Phone / PC",
+      "layer": "Windows PC",
       "confidence": "high",
       "match": {
         "kind": "BLE",
@@ -258,7 +258,7 @@
     {
       "id": "windows-3e1d",
       "name": "Windows PC",
-      "layer": "Phone / PC",
+      "layer": "Windows PC",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -399,7 +399,7 @@
     {
       "id": "apple-nearby-info",
       "name": "iPhone, iPad, Mac or Apple Watch",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "high",
       "match": {
         "kind": "BLE",
@@ -411,7 +411,7 @@
     {
       "id": "apple-handoff",
       "name": "Apple device (Handoff)",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "high",
       "match": {
         "kind": "BLE",
@@ -422,7 +422,7 @@
     {
       "id": "apple-nearby-action",
       "name": "Apple device (Nearby Action: setup or Wi-Fi sharing)",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "high",
       "match": {
         "kind": "BLE",
@@ -433,7 +433,7 @@
     {
       "id": "apple-airdrop",
       "name": "Apple device (AirDrop)",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "high",
       "match": {
         "kind": "BLE",
@@ -455,7 +455,7 @@
     {
       "id": "apple-airplay-source",
       "name": "Apple device playing to AirPlay",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -488,7 +488,7 @@
     {
       "id": "apple-hotspot",
       "name": "iPhone or iPad (Instant Hotspot)",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -499,7 +499,7 @@
     {
       "id": "apple-hotspot-client",
       "name": "Apple device looking for a hotspot",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -510,7 +510,7 @@
     {
       "id": "apple-siri",
       "name": "Apple device (Hey Siri)",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -532,7 +532,7 @@
     {
       "id": "apple-other",
       "name": "Apple device",
-      "layer": "Phone / PC",
+      "layer": "Apple device",
       "confidence": "low",
       "match": {
         "kind": "BLE",
@@ -543,7 +543,7 @@
     {
       "id": "samsung-galaxy",
       "name": "Samsung Galaxy device (phone, tablet, PC or watch)",
-      "layer": "Phone / PC",
+      "layer": "Samsung",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -555,7 +555,7 @@
     {
       "id": "samsung-other",
       "name": "Samsung device",
-      "layer": "Phone / PC",
+      "layer": "Samsung",
       "confidence": "low",
       "match": {
         "kind": "BLE",
@@ -565,7 +565,7 @@
     {
       "id": "microsoft",
       "name": "Windows device",
-      "layer": "Phone / PC",
+      "layer": "Windows PC",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -598,7 +598,7 @@
     {
       "id": "oneplus",
       "name": "OnePlus device (phone or earbuds)",
-      "layer": "Phone / PC",
+      "layer": "Android / Google",
       "confidence": "low",
       "match": {
         "kind": "BLE",
@@ -608,7 +608,7 @@
     {
       "id": "google-fef3",
       "name": "Google / Android device (service FEF3)",
-      "layer": "Phone / PC",
+      "layer": "Android / Google",
       "confidence": "low",
       "match": {
         "kind": "BLE",
@@ -619,7 +619,7 @@
     {
       "id": "google-fcf1",
       "name": "Google / Android device (service FCF1)",
-      "layer": "Phone / PC",
+      "layer": "Android / Google",
       "confidence": "low",
       "match": {
         "kind": "BLE",
@@ -630,7 +630,7 @@
     {
       "id": "google-fe9f",
       "name": "Google device (service FE9F)",
-      "layer": "Phone / PC",
+      "layer": "Android / Google",
       "confidence": "low",
       "match": {
         "kind": "BLE",

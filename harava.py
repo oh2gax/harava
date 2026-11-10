@@ -258,10 +258,14 @@ CLASS_CATEGORY = {
     "ISP": "Network",
 }
 # Layers that are not a Fieldwatch class of their own. Fieldwatch files TVs, printers and sensors
-# under HOME; Harava gives these signatures a layer by name, and its own rules (ids/harava_ids.json)
-# name the same layers. Everything else of the class stays on Home & IoT.
-EXTRA_LAYERS = ["TV & media", "EV charger", "Printer", "Sensor"]
+# under HOME, and every phone and computer under PHONE; Harava gives these signatures a layer by
+# name, and its own rules (ids/harava_ids.json) name the same layers. Everything else of the class
+# stays on Home & IoT or Phone / PC.
+EXTRA_LAYERS = ["TV & media", "EV charger", "Printer", "Sensor",
+                "Apple device", "Android / Google", "Samsung", "Windows PC"]
+PHONE_LAYERS = ["Phone / PC", "Apple device", "Android / Google", "Samsung", "Windows PC"]
 SIG_LAYER = {
+    "Apple Device": "Apple device", "Google": "Android / Google", "Microsoft Device": "Windows PC",
     "LG webOS TV": "TV & media", "Roku": "TV & media",
     "HP": "Printer", "Epson": "Printer",
     "Ruuvi": "Sensor", "Blue Maestro": "Sensor", "SensorPush": "Sensor", "RadiaCode": "Sensor",
@@ -1335,12 +1339,12 @@ def mfg_payload(mfg, raw):
 FINDMY_BATTERY = ("full", "medium", "low", "very low")
 FINDMY_IDENTS = {
     "findmy-apple-device": {
-        "name": "Apple device (Find My)", "layer": "Phone / PC", "confidence": "medium",
+        "name": "Apple device (Find My)", "layer": "Apple device", "confidence": "medium",
         "note": "A Find My message whose status byte says \"Apple device\": an iPhone, iPad or Mac telling the "
                 "Find My network where it is, not an AirTag. Fieldwatch's AirTag signature matches every "
                 "Find My message. The address is not the one of the device's other messages, and it changes often."},
     "findmy-apple-offline": {
-        "name": "Apple device, offline (Find My)", "layer": "Phone / PC", "confidence": "medium",
+        "name": "Apple device, offline (Find My)", "layer": "Apple device", "confidence": "medium",
         "note": "A Find My message with the full key, whose status byte says \"Apple device\": an iPhone, iPad "
                 "or Mac that has no network connection (asleep, switched off or lost), so it asks passing "
                 "Apple devices to report it. Not an AirTag."},
@@ -1644,7 +1648,7 @@ def build_devices(hears):
                 reclass = cat
                 # (the class stays a Fieldwatch class: Fieldwatch did name this radio, only too broadly)
                 cls, cat = (cls2, cat2) if cat2 != "Unidentified" else \
-                    ({"Phone / PC": "PHONE", "Audio": "AUDIO"}.get(hv["layer"], "HARAVA"), hv["layer"])
+                    ({"Apple device": "PHONE", "Audio": "AUDIO"}.get(hv["layer"], "HARAVA"), hv["layer"])
         if hv and hv["layer"] and (cat == "Unidentified" or (kind == "WIFI" and not fleet_s)):
             # Harava's own database identified it (a Wi-Fi network without a signature is only
             # "Network" for want of anything better: a rule may say it is a TV's or a printer's own)
