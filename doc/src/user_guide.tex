@@ -42,7 +42,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava --- what your phone heard, raked together}
-\fancyhead[R]{\small\itshape User guide, version 1.4 --- November 2026}
+\fancyhead[R]{\small\itshape User guide, version 1.5 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -63,7 +63,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad User guide, version 1.4 \quad$\cdot$\quad 9 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad User guide, version 1.5 \quad$\cdot$\quad 10 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava}\par\vspace{5pt}
 {\large\bfseries How to collect with Fieldwatch and read what your phone heard:\\ import, map, devices, layers and the classroom phone check}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -290,7 +290,7 @@ Each radio has \textbf{one pin}, at the place where your phone heard it \emph{lo
 \end{itemize}
 Hover over a pin for its name, layer, signal and hears; click it for its details.
 
-\fig{g_trackers.jpg}{0.9}{Only the \emph{Tracker} layer, zoomed in at home. Each tag icon is one tracker address heard during the day. All were weak and heard once or twice --- neighbours' tags and passers-by, nothing that followed the phone.}
+\fig{g_trackers.jpg}{0.9}{Only the \emph{Tracker} layer, zoomed in at home, after Harava moved the iPhones, iPads and Macs to the Phone / PC layer (29 addresses left of Fieldwatch's 143). Each tag icon is one tracker address heard during the day. All were weak and heard once or twice --- neighbours' tags and passers-by, nothing that followed the phone.}
 
 \subsection{The timeline}\label{sec:timeline}
 \fig{g_timeline.jpg}{0.95}{Hears per 10 minutes: Wi-Fi (blue) and Bluetooth (green) bars, and the number of new radios (line, right scale). The busy peaks around 08:00--11:00 are at home; the drives show as short bursts of many new radios.}
@@ -321,7 +321,7 @@ Field & What it tells\\
 Name, address & the advertised name and the MAC address; \emph{(hidden network)} for a Wi-Fi without a name\\
 Pills & the layer, the radio (Wi-Fi band or Bluetooth LE), and \emph{travelled} with the distance\\
 Signatures, vendor & the Fieldwatch signatures that matched, and the maker of the address block\\
-Tracker mode & \emph{separated} (away from its owner) or \emph{near owner}, read from the raw data\\
+Tracker mode & \emph{separated} (away from its owner) or \emph{near owner}, read from the raw data; for Find My also the battery, in the note\\
 Sensor & a Ruuvi tag's temperature, humidity, pressure and battery\\
 Hears & how many times it was written down; with a Sit, also the log rows and the Sit hits\\
 First / last & the first and last time heard (in the chosen range)\\
@@ -361,7 +361,7 @@ Harava remembers your choice. The \emph{Categories} card on the map shows the sa
 Group & Layer & Examples from the catalog\\
 \midrule
 Watch list & Glasses \& VR & Ray-Ban / Meta, Even G1, Snap Spectacles, Vuzix, RayNeo, Brilliant Frame; Meta Quest and other VR headsets\\
-(icon pins) & Tracker & Apple AirTags (Find My), Google Find Hub, Samsung SmartTag, Tile, Chipolo, Pebblebee, DULT\\
+(icon pins) & Tracker & Apple AirTags and Find My accessories (not iPhones: see Section~\ref{sec:reading}), Google Find Hub, Samsung SmartTag, Tile, Chipolo, Pebblebee, DULT\\
  & Surveillance & Flock Safety, Axis, Dahua, traffic sensors (BlipTrack, BlueTOAD)\\
  & Police / body cam & Axon, Digital Ally, in-car routers\\
  & Drone & DJI, Autel, Parrot, Remote ID\\
@@ -374,6 +374,7 @@ Places \& things & Vehicle & Tesla, Audi MMI, BMW, CarPlay, tyre-pressure sensor
  & Camera, Smart lock & Arlo, GoPro, Nest; SALTO, Yale, Nuki\\
  & Home \& IoT, Thermostat & Ruuvi, Govee, Amazon, Hue; ecobee, Nest\\
  & Shelf label / sign, Beacon, Mesh radio & electronic shelf labels; iBeacon, Estimote; Meshtastic, goTenna\\
+ & Two-way radio & Icom ID-52, Bluetooth speaker-microphones of Icom, Yaesu and Kenwood, PTT buttons\\
 \midrule
 Background & Network & Wi-Fi access points and routers\\
  & Unidentified & no signature matched: most random Bluetooth addresses\\
@@ -433,6 +434,8 @@ Flags & \texttt{RAND} random address, \texttt{HIDDEN} hidden network\\
 Fieldwatch's signatures name only part of what it hears. On 8 November it left 1,782 Bluetooth radios \emph{Unidentified}. Harava has its own identification database on top of the signatures, and it named 1,725 of them (97\,\%).
 
 \fig{g_ids.jpg}{1.0}{The \ui{Identification} page for 8 November: the counts at the top, the patterns that are still unknown, and the rules with how many radios each matched.}
+
+\lead{Keeping up with Fieldwatch.} Fieldwatch gets new versions often, with new signatures and sometimes a changed log. The line \emph{Fieldwatch signature table} at the top of the page tells which catalog of Fieldwatch Harava's layers come from. If your data has a signature name that the table does not know, an amber warning names it: Fieldwatch on the phone is then newer than Harava's table, and such radios show as \emph{Unidentified} until the table is refreshed (\texttt{python tools/update\_fieldwatch\_signatures.py}, then deploy; \texttt{-{}-check} only tells what is different).
 
 \lead{What it reads.} A Bluetooth radio advertises a few short pieces of data: a company number, service numbers, and data in a known format. Harava compares them with two files in the \texttt{ids} folder:
 \begin{itemize}[leftmargin=1.2em]
@@ -501,6 +504,15 @@ The data, the CSV export and the database are not changed, and \ui{Add} in My de
 \lead{Travelled.} The same address heard in two places at least 500\,m apart went with you --- or followed you. On 8 November two radios did: a D-Link 4G router (about $-70$\dBm\ at home, $-29$\dBm\ at the first stop 3.7\,km away, heard as the phone came and went; it fits a router kept in the car) and a device named EF-R3PB2139 (the name fits an EcoFlow River 3 Plus power station). Random addresses rarely travel, because they change, so a travelling \emph{fixed} address is the interesting case.
 
 \lead{Trackers.} An AirTag or other tag \emph{near its owner} is normal: every Apple user carries some. A tag \emph{separated} from its owner and heard in several places along your way, over a long time, deserves a closer look. Fieldwatch and Harava read the mode from the raw data: for Apple Find My a full-key frame means separated; for Google Find Hub and DULT a flag byte tells it. Signals from one tag change address too, so look at the pattern, not at one address.
+
+\lead{An ``AirTag'' is usually an iPhone.} Every device of Apple's Find My network sends the same kind of message: AirTags, but also iPhones, iPads and Macs (so that they can be found), AirPods, and other makers' Find My items. Fieldwatch's \emph{Apple AirTags} signature matches the message itself, so most of its ``AirTags'' are phones and computers --- in the author's data of 8--10 November, 320 of 352. One byte of the message tells the kind of device, and Harava reads it:
+\begin{itemize}[leftmargin=1.2em]
+\item \textbf{Apple device (Find My)} and \textbf{Apple device, offline (Find My)} --- an iPhone, iPad or Mac; moved to the \emph{Phone / PC} layer. \emph{Offline} is the full-key message of a device without a network connection (asleep, switched off or lost);
+\item \textbf{AirPods or Beats (Find My)} --- moved to the \emph{Audio} layer;
+\item \textbf{Apple AirTag} and \textbf{Find My accessory or newer AirTag} --- stay on the \emph{Tracker} layer. An accessory is another maker's item with Find My (key finder, bag, bike) or a 2nd-generation AirTag; the message alone cannot tell which;
+\item \textbf{Apple Find My device, kind not known} --- a radio that only a Sit export has: a Sit carries no advertisement, so the byte cannot be read. It stays on the Tracker layer, but most such radios are iPhones too. Run the log together with the Sit.
+\end{itemize}
+The radio's panel still shows Fieldwatch's signature, with \emph{layer by Harava} after it. The Find My message of a phone comes from another address than the phone's other messages, and the address changes often: the count of addresses is not a count of phones.
 
 \lead{Signatures are patterns.} A signature is a hint, not proof: an OUI (maker) match, a name or a data pattern. \emph{Ray-Ban / Meta glasses} also matches Quest headsets; an \emph{Apple Device} may be an iPhone, a Mac or an iPad.
 

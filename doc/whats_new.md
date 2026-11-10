@@ -4,6 +4,15 @@ Short notes for users, newest first. Each version is one day of development (v.D
 The full technical history is in CHANGELOG.md. The newest heading gives the version shown
 under the app name.
 
+## v.10112026 — AirTags that are really iPhones, and Fieldwatch 1.1.43's new raw data
+
+- **An "AirTag" is usually an iPhone** — Fieldwatch's *Apple AirTags* signature matches every Apple Find My message, and iPhones, iPads, Macs and AirPods send those too. Harava now reads the kind of device from the message: *Apple device (Find My)* moves to the Phone / PC layer and *AirPods or Beats (Find My)* to Audio; only *Apple AirTag* and *Find My accessory or newer AirTag* stay on the Tracker layer. In the first three days of data, 320 of 352 "AirTags" were Apple's own devices.
+- **Sit-only radios** — a Sit export carries no advertisement, so the kind cannot be read: such radios show as *Apple Find My device, kind not known* and stay on the Tracker layer. Run the log together with the Sit.
+- **Fieldwatch 1.1.43** — since 9 November Fieldwatch writes the whole advertisement into the log, where it used to write only the manufacturer data. Harava now reads both forms; before, many radios logged by the new version got a wrong identification (iPhones shown as AirPods), and Ruuvi temperatures were missing.
+- **Keeping up with Fieldwatch** — Harava's signature table is now Fieldwatch's catalog 103 (version 1.1.43). The Identification page tells which catalog the table is from, and warns in amber when your data has signature names the table does not know: then Fieldwatch on the phone is newer than Harava. `python tools/update_fieldwatch_signatures.py` refreshes the table.
+- **Two-way radio layer** — Fieldwatch 1.1.43 recognises the Icom ID-52 and the Bluetooth speaker-microphones of Icom, Yaesu and Kenwood; they get their own layer under Places & things.
+- **Guides** — User guide 1.5 and Mobile guide 1.4 explain the Find My kinds; the User guide also tells how to keep up with Fieldwatch.
+
 ## v.09112026 — Import without duplicates and everyone's own data, the Harava phone app and the Workbench, Harava on the web with users and permissions, its own identification database, user guides, device layers, my own devices and Sit exports
 
 - **Bluetooth paused** — when the screen goes dark, many phones (Samsung above all) park the Bluetooth scan while Wi-Fi goes on. The timeline now shades those stretches in amber, and *▨ Bluetooth paused* in its title tells how much of the day it was: Bluetooth radios there were not heard, so an empty stretch does not mean nothing was there. For walks and Sits, keep Fieldwatch in front with *Keep screen on*.

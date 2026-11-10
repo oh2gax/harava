@@ -579,7 +579,7 @@
       <div class="m-kv">
         ${d.ident ? `<span>Identified as</span><b class="id-${d.ident_conf === 'low' ? 'low' : 'high'}">${esc(d.ident)}${conf}</b>` : ''}
         ${d.company ? `<span>Company</span><b>${esc(d.company)}</b>` : ''}
-        <span>Signatures</span><b>${esc(d.fleets || '–')}</b>
+        <span>Signatures</span><b>${esc(d.fleets || '–')}${d.reclass ? ' <span style="color:var(--text-muted);font-weight:400">· layer by Harava</span>' : ''}</b>
         <span>Vendor</span><b>${esc(d.vendor || '–')}</b>
         ${(d.group_size || 1) > 1 ? `<span>Same device</span><b>${d.group_size} addresses${d.group_name ? ' · ' + esc(d.group_name) : ''}</b>` : ''}
         ${d.sensor ? `<span>Sensor</span><b>${d.sensor.temp_c.toFixed(1)} °C · ${d.sensor.humidity.toFixed(0)} % · ${d.sensor.pressure_hpa} hPa · ${(d.sensor.battery_mv / 1000).toFixed(2)} V</b>` : ''}
@@ -713,6 +713,8 @@
   async function loadIds() {
     const r = await api('/api/ids?' + rangeQuery()), c = r.counts;
     $('m-id-db').textContent = `${r.db.rules} rules`;
+    const sg = sigTableHtml(r.signatures);
+    $('m-id-sig').innerHTML = sg.line + sg.warn;
     $('m-id-ble').textContent = n0(c.ble); $('m-id-left').textContent = n0(c.fieldwatch_left);
     $('m-id-ok').textContent = `${n0(c.harava_identified)} (${c.fieldwatch_left ? Math.round(100 * c.harava_identified / c.fieldwatch_left) : 0} %)`;
     $('m-id-still').textContent = n0(c.still_unidentified);

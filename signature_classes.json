@@ -1,5 +1,11 @@
 {
-"source": "OffGridPete/Fieldwatch dist/fieldwatch-signatures-v2.json (MIT), catalogVersion 100",
+"source": "OffGridPete/Fieldwatch dist/fieldwatch-signatures-v2.json (MIT), catalogVersion 103",
+"catalog": 103,
+"app_version": "1.1.43",
+"fetched": "2026-11-10",
+"retired": [
+"Novatel Wireless"
+],
 "classes": {
 "Actiontec": "ISP",
 "Adtran": "ISP",
@@ -28,7 +34,9 @@
 "Axon": "LAW_ENFORCEMENT",
 "Bee Pendant": "WEARABLE",
 "Belkin": "ISP",
+"Benshi radio": "TWO_WAY",
 "Bitchat": "MESH",
+"BLE PTT button": "TWO_WAY",
 "BlipTrack": "SURVEILLANCE",
 "Blue Maestro": "HOME",
 "BlueTOAD Spectra": "SURVEILLANCE",
@@ -117,11 +125,15 @@
 "HUMAX": "ISP",
 "Hyundai": "VEHICLE",
 "iBeacon": "BEACON",
+"Icom ID-52": "TWO_WAY",
+"Icom VS-3": "TWO_WAY",
 "igloohome": "LOCK",
 "Inseego": "ISP",
 "Insta360": "CAMERA",
 "Jaguar Land Rover": "VEHICLE",
 "JBL / Harman": "AUDIO",
+"Kenwood KHS-55BT": "TWO_WAY",
+"Kenwood KHS-56BT": "TWO_WAY",
 "Kevo": "LOCK",
 "Kontakt.io": "BEACON",
 "Kwikset": "LOCK",
@@ -139,6 +151,7 @@
 "Mercedes MBUX": "VEHICLE",
 "MeshCore": "MESH",
 "Meshtastic": "MESH",
+"Meta Quest": "WEARABLE",
 "Microsoft Device": "PHONE",
 "MikroTik": "ISP",
 "Minew": "BEACON",
@@ -246,6 +259,7 @@
 "Vantiva": "ISP",
 "Verizon": "ISP",
 "Verkada": "SURVEILLANCE",
+"VGC BHM-88": "TWO_WAY",
 "Volkswagen": "VEHICLE",
 "Vuzix": "GLASSES",
 "WatchGuard AP": "ISP",
@@ -257,6 +271,8 @@
 "Wyze": "CAMERA",
 "Xfinity": "ISP",
 "Xiaomi Mi Home": "HOME",
+"Yaesu SSM-BT10": "TWO_WAY",
+"Yaesu SSM-BT20": "TWO_WAY",
 "Yuneec": "DRONE",
 "Zyxel": "ISP"
 }

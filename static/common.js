@@ -23,6 +23,7 @@ const CAT = [
     ['Places & things', 'Shelf label / sign', '#22d3ee'],
     ['Places & things', 'Beacon', '#2dd4bf'],
     ['Places & things', 'Mesh radio', '#facc15'],
+    ['Places & things', 'Two-way radio', '#b45309'],
     ['Background', 'Network', '#60a5fa'],
     ['Background', 'Unidentified', '#94a3b8'],
 ];
@@ -39,6 +40,19 @@ function fmtTime(ms, withDate) {
     return withDate ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${t}` : t;
 }
 function fmtM(m) { return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m'; }
+// The Fieldwatch signature table behind the layers (/api/ids → signatures): where it comes from, and a
+// warning when this data has signature names it does not know (Fieldwatch was updated; Harava was not).
+function sigTableHtml(s) {
+    if (!s) return { line: '', warn: '' };
+    const line = `Fieldwatch signature table: catalog ${s.catalog ?? '?'}${s.app_version ? ' (Fieldwatch ' + esc(s.app_version) + ')' : ''}, ` +
+        `${s.names} names${s.fetched ? ', fetched ' + esc(s.fetched) : ''}`;
+    const list = a => a.map(x => `<b>${esc(x.name)}</b> (${x.radios})`).join(', ');
+    let warn = '';
+    if (s.unknown && s.unknown.length) warn += `<div class="sig-warn">⚠ Signature names in this data that the table does not know: ${list(s.unknown)}. ` +
+        'Fieldwatch has probably been updated: refresh the table (<span class="mono">python tools/update_fieldwatch_signatures.py</span>).</div>';
+    if (s.no_layer && s.no_layer.length) warn += `<div class="sig-warn">⚠ Signatures of a class that has no layer yet: ${list(s.no_layer)}. They show as Unidentified.</div>`;
+    return { line, warn };
+}
 function fmtDur(ms) { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${pad(m % 60)} min` : `${m} min`; }
 
 // Bluetooth coverage on the timeline (/api/timeline → bt_gaps, bt_cov). When the screen goes dark,
@@ -119,6 +133,8 @@ function groupSame(list) {
 function phoneType(d, opts) {
     if (d.kind !== 'BLE') return null;
     if (!['Phone / PC', 'Unidentified'].includes(d.category)) return null;
+    // a phone's Find My message comes from a second address: the phone is counted by its other messages
+    if ((d.ident_id || '').startsWith('findmy-')) return null;
     const f = d.fleets || '', n = (d.name || '').toLowerCase();
     if (/\btv\b|\[tv\]|qled|oled|series|monitor|soundbar|fridge|watch|buds|band|fit\d|ring|speaker/.test(n)) return null;
     if (f.includes('Microsoft Device')) return opts.ms ? 'Windows PC' : null;

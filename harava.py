@@ -217,11 +217,20 @@ def move_old_database():
         print(f"[WARN] could not rename fieldwatch.db to harava.db ({e}); using fieldwatch.db as it is")
 
 # Signature name -> class (FINDER, VEHICLE, PHONE ...) from the Fieldwatch catalog.
+# Refresh with:  python tools/update_fieldwatch_signatures.py   (Fieldwatch adds signatures often)
 try:
     with open(os.path.join(HERE, "signature_classes.json"), encoding="utf-8") as fh:
-        SIG_CLASS = json.load(fh)["classes"]
+        _sig = json.load(fh)
+    SIG_CLASS = _sig["classes"]
+    _m = re.search(r"catalogVersion (\d+)", _sig.get("source", ""))
+    SIG_META = {"catalog": _sig.get("catalog") or (int(_m.group(1)) if _m else None),
+                "app_version": _sig.get("app_version", ""), "fetched": _sig.get("fetched", ""),
+                "names": len(SIG_CLASS)}
 except Exception:
-    SIG_CLASS = {}
+    SIG_CLASS, SIG_META = {}, {"catalog": None, "app_version": "", "fetched": "", "names": 0}
+# Where Harava files a signature differently from Fieldwatch. Fieldwatch calls a Meta Quest headset
+# a wearable; in Harava headsets share the Glasses & VR layer with the glasses (tagged "VR?").
+SIG_CLASS_OVERRIDE = {"Meta Quest": "GLASSES"}
 
 # Signature class -> the category shown in the app. The first match in
 # CLASS_PRIORITY wins when a radio matched several signatures.
@@ -245,14 +254,16 @@ CLASS_CATEGORY = {
     "SIGNAGE": "Shelf label / sign",
     "BEACON": "Beacon",
     "MESH": "Mesh radio",
+    "TWO_WAY": "Two-way radio",
     "ISP": "Network",
 }
 CLASS_PRIORITY = ["HACKING", "SURVEILLANCE", "LAW_ENFORCEMENT", "DRONE", "GLASSES", "FINDER",
-                  "VEHICLE", "CAMERA", "LOCK", "MESH", "WEARABLE", "HEALTH", "AUDIO", "HOME",
+                  "VEHICLE", "CAMERA", "LOCK", "MESH", "TWO_WAY", "WEARABLE", "HEALTH", "AUDIO", "HOME",
                   "THERMOSTAT", "SIGNAGE", "BEACON", "PHONE", "ISP"]
 # Glasses and VR headsets share one layer. Meta uses the same Bluetooth ID (0x058E / FEB8) for
 # Ray-Ban glasses and Quest headsets; a name like this tells that it is probably a headset.
 VR_NAME = re.compile(r"\bquest\b|oculus|\bpico\b|vision pro|valve index|\bvive\b", re.I)
+NAME_AIRTAG = re.compile(r"airtag", re.I)
 VEHICLE_NAME = re.compile(r"polestar|tesla|obdlink|mitsubishi|audi_mmi|mbux|bmw|volvo|skoda|"
                           r"vw_|toyota|my ?car|carplay", re.I)
 
@@ -1219,14 +1230,25 @@ def adv_features(mfg, raw, uuids):
     """What the advertisement says: company + manufacturer data, AD structures, service data, service UUIDs."""
     f = {"mfg": "", "mfg_data": b"", "ads": [], "sd": {}, "svc": set(), "uuid128": []}
     raw = (raw or "").strip().upper()
+    whole = False
     if mfg:
         f["mfg"] = mfg.upper().zfill(4)
-        try:
-            f["mfg_data"] = bytes.fromhex(raw)       # with manufacturer data, Fieldwatch's raw is that data
-        except ValueError:
-            pass
-    elif raw:
-        ads = parse_ad(raw) or []                    # without it, raw is the whole advertisement
+        # Up to Fieldwatch 1.1.42 raw was the manufacturer data when there was any; from 1.1.43
+        # (9 Nov 2026) raw is always the whole advertisement. It is the whole advertisement when it
+        # splits into AD structures and one of them is the manufacturer data of this very company.
+        ads = parse_ad(raw) if raw else None
+        whole = bool(ads) and any(t == "FF" and len(d) >= 2 and format(int.from_bytes(d[:2], "little"), "04X") == f["mfg"]
+                                  for t, d in ads)
+        if not whole:
+            try:
+                f["mfg_data"] = bytes.fromhex(raw)
+            except ValueError:
+                try:
+                    f["mfg_data"] = bytes.fromhex(raw[:len(raw) // 2 * 2])     # cut in the middle of a byte
+                except ValueError:
+                    pass
+    if raw and (whole or not mfg):
+        ads = parse_ad(raw) or []                    # raw is the whole advertisement
         f["ads"] = ads
         for t, data in ads:
             if t == "16" and len(data) >= 2:
@@ -1237,9 +1259,11 @@ def adv_features(mfg, raw, uuids):
             elif t in ("06", "07", "21") and len(data) >= 16:      # 128-bit service UUIDs / service data
                 u = data[:16][::-1].hex().upper()
                 f["uuid128"].append(f"{u[:8]}-{u[8:12]}-{u[12:16]}-{u[16:20]}-{u[20:]}")
-            elif t == "FF" and len(data) >= 2 and not f["mfg"]:
-                f["mfg"] = format(int.from_bytes(data[:2], "little"), "04X")
-                f["mfg_data"] = data[2:]
+            elif t == "FF" and len(data) >= 2 and not f["mfg_data"]:
+                c = format(int.from_bytes(data[:2], "little"), "04X")
+                if not f["mfg"] or f["mfg"] == c:
+                    f["mfg"] = c
+                    f["mfg_data"] = data[2:]
     for u in (uuids or "").replace(",", "|").split("|"):
         u16 = _uuid16(u)
         if u16:
@@ -1275,9 +1299,94 @@ def _rule_matches(m, kind, name, f):
     return True
 
 
+def mfg_payload(mfg, raw):
+    """The manufacturer data (after the company ID) as hex, whichever way Fieldwatch wrote `raw`."""
+    return adv_features(mfg, raw, "")["mfg_data"].hex().upper()
+
+
+# Apple Find My. Every device of the Find My network sends Apple message type 0x12: AirTags, but
+# also iPhones, iPads and Macs (so that they can be found), AirPods and other makers' Find My
+# items. Fieldwatch's "Apple AirTags" signature matches the message type alone, so most of its
+# "AirTags" are phones and computers. The status byte that follows tells which: bits 4-5 are the
+# kind of device (0 Apple device, 1 AirTag, 2 Find My accessory, 3 AirPods), bits 6-7 the battery
+# (as read by the AirGuard app of TU Darmstadt, github.com/seemoo-lab/AirGuard). Length 0x19 is the
+# "separated" frame with the public key, 0x02 the short frame sent while the owner is near.
+FINDMY_BATTERY = ("full", "medium", "low", "very low")
+FINDMY_IDENTS = {
+    "findmy-apple-device": {
+        "name": "Apple device (Find My)", "layer": "Phone / PC", "confidence": "medium",
+        "note": "A Find My message whose status byte says \"Apple device\": an iPhone, iPad or Mac telling the "
+                "Find My network where it is, not an AirTag. Fieldwatch's AirTag signature matches every "
+                "Find My message. The address is not the one of the device's other messages, and it changes often."},
+    "findmy-apple-offline": {
+        "name": "Apple device, offline (Find My)", "layer": "Phone / PC", "confidence": "medium",
+        "note": "A Find My message with the full key, whose status byte says \"Apple device\": an iPhone, iPad "
+                "or Mac that has no network connection (asleep, switched off or lost), so it asks passing "
+                "Apple devices to report it. Not an AirTag."},
+    "findmy-airtag": {
+        "name": "Apple AirTag", "layer": "Tracker", "confidence": "medium",
+        "note": "A Find My message whose status byte says \"AirTag\"."},
+    "findmy-accessory": {
+        "name": "Find My accessory or newer AirTag", "layer": "Tracker", "confidence": "medium",
+        "note": "A Find My message whose status byte says \"accessory\": another maker's item with Find My "
+                "(key finder, bag, bike, earbuds) or a 2nd-generation AirTag. The advertisement alone "
+                "cannot tell which."},
+    "findmy-airpods": {
+        "name": "AirPods or Beats (Find My)", "layer": "Audio", "confidence": "medium",
+        "note": "A Find My message from earbuds or headphones: the status byte says \"AirPods\", or the same "
+                "advertisement also carries Apple's pairing message for audio devices."},
+    "findmy-unknown": {
+        "name": "Apple Find My device, kind not known", "layer": "Tracker", "confidence": "medium",
+        "note": "Fieldwatch's AirTag signature matched, but there is no advertisement data to tell the kind of "
+                "device (a Sit export has none). Most such radios are iPhones, iPads and Macs, not tags."},
+}
+
+
+def findmy_info(f):
+    """Read an Apple Find My message from adv_features() output.
+    Returns {'id', 'mode', 'battery', 'status'} or None when the advertisement has none."""
+    if f["mfg"] != "004C" and "FD44" not in f["sd"]:
+        return None
+    b, i, status, length, pairing = f["mfg_data"], 0, None, 0, False
+    while f["mfg"] == "004C" and i + 1 < len(b):               # Apple messages: type, length, data
+        t, n = b[i], b[i + 1]
+        if t == 0x12 and i + 2 < len(b) and status is None:
+            status, length = b[i + 2], n
+        elif t == 0x07:
+            pairing = True
+        i += 2 + n
+    if status is None:
+        if "FD44" in f["sd"]:                                   # the Find My accessory service, no message 0x12
+            return {"id": "findmy-accessory", "mode": "", "battery": "", "status": None}
+        return None
+    kind = (status >> 4) & 3
+    mode = "separated" if length == 0x19 else ("near owner" if length == 0x02 else "")
+    if kind == 0:
+        ident = "findmy-apple-offline" if mode == "separated" else "findmy-apple-device"
+    elif kind == 1:
+        ident = "findmy-airtag"
+    elif kind == 3 or pairing:
+        ident = "findmy-airpods"
+    else:
+        ident = "findmy-accessory"
+    return {"id": ident, "mode": mode, "battery": FINDMY_BATTERY[status >> 6] if kind else "", "status": status}
+
+
+def _findmy_ident(ident_id, fm=None):
+    e = FINDMY_IDENTS[ident_id]
+    note = e["note"]
+    if fm and fm.get("battery"):
+        note += f" Battery: {fm['battery']}."
+    return {"id": ident_id, "name": e["name"], "layer": e["layer"], "confidence": e["confidence"],
+            "note": note, "company": BT["companies"].get("004C", "Apple, Inc."), "group": "", "findmy": fm or {}}
+
+
 def identify(kind, name, mfg, raw, uuids):
     """Harava's identification of one radio: {'id','name','layer','confidence','note','company','group'}."""
     f = adv_features(mfg, raw, uuids) if kind == "BLE" else {"mfg": "", "mfg_data": b"", "ads": [], "sd": {}, "svc": set(), "uuid128": []}
+    fm = findmy_info(f) if kind == "BLE" else None
+    if fm:                                            # built in: the rules cannot read single bits
+        return _findmy_ident(fm["id"], fm)
     custom = next((u for u in f["uuid128"] if not u.endswith("-0000-1000-8000-00805F9B34FB")), "")
     company = BT["companies"].get(f["mfg"], "") if f["mfg"] else ""
     if not company:
@@ -1325,7 +1434,7 @@ load_ids()
 
 def classify(fleets, name, kind):
     names = [f for f in (fleets or "").split("+") if f]
-    classes = [SIG_CLASS.get(f, "") for f in names]
+    classes = [SIG_CLASS_OVERRIDE.get(f) or SIG_CLASS.get(f, "") for f in names]
     for c in CLASS_PRIORITY:
         if c in classes:
             return c, CLASS_CATEGORY[c]
@@ -1338,7 +1447,7 @@ def classify(fleets, name, kind):
     return "", "Unidentified"
 
 
-def tracker_mode(raw, fleets):
+def tracker_mode(raw, fleets, mfg=""):
     raw = (raw or "").upper()
     f = fleets or ""
     if "Find Hub" in f and "16AAFE" in raw:
@@ -1351,10 +1460,8 @@ def tracker_mode(raw, fleets):
         except ValueError:
             return ""
     if "AirTag" in f or raw.startswith("12"):
-        if raw.startswith("1219"):
-            return "separated"
-        if raw.startswith("1202"):
-            return "near owner"
+        fm = findmy_info(adv_features(mfg or "4C", raw, ""))
+        return fm["mode"] if fm else ""
     return ""
 
 
@@ -1495,16 +1602,41 @@ def build_devices(hears):
         freq = next((h["freq"] for h in hs if h["freq"]), 0)
         uuids = next((h["uuids"] for h in hs if h["uuids"]), "")
         hv = identify(kind, name, mfg, raw, uuids)
+        reclass = ""
+        if kind == "BLE" and "Apple AirTags" in fleets:
+            # Fieldwatch's AirTag signature matches every Find My message. Look through all the
+            # advertisements of this address for one that tells the kind of device.
+            if not (hv and hv["id"].startswith("findmy-")):
+                for r in dict.fromkeys(h["raw"] for h in hs if h["raw"] and h["raw"] != raw):
+                    alt = identify(kind, name, mfg, r, uuids)
+                    if alt and alt["id"].startswith("findmy-"):
+                        hv, raw = alt, r
+                        break
+                else:
+                    if not any(h["raw"] for h in hs) and not NAME_AIRTAG.search(name or ""):
+                        hv = _findmy_ident("findmy-unknown")      # a Sit row: no advertisement to read
+            if hv and hv["id"].startswith("findmy-") and hv["layer"] != "Tracker":
+                # not a tag: the layer comes from the other signatures, or from what the message says
+                cls2, cat2 = classify("+".join(x for x in fleets if x != "Apple AirTags"), name, kind)
+                reclass = cat
+                # (the class stays a Fieldwatch class: Fieldwatch did name this radio, only too broadly)
+                cls, cat = (cls2, cat2) if cat2 != "Unidentified" else \
+                    ({"Phone / PC": "PHONE", "Audio": "AUDIO"}.get(hv["layer"], "HARAVA"), hv["layer"])
         if hv and cat == "Unidentified" and hv["layer"]:
             cls, cat = "HARAVA", hv["layer"]          # Harava's own database identified it
-        tmode = tracker_mode(raw, fleet_s) if cat == "Tracker" else ""
-        sensor = ruuvi_decode(raw) if ("Ruuvi" in fleet_s or mfg == "499") and raw else None
+        tmode = ""
+        if cat == "Tracker":
+            fm = (hv or {}).get("findmy") or {}
+            tmode = fm.get("mode") or tracker_mode(raw, fleet_s, mfg)
+        sensor = None
+        if ("Ruuvi" in fleet_s or mfg == "499") and raw:
+            sensor = ruuvi_decode(mfg_payload(mfg, raw) or raw)
         out.append({
             "kind": kind, "mac": mac, "name": name, "vendor": vendor,
             "fleets": fleet_s, "class": cls, "category": cat,
             "hears": max(len(log_hs), sit_hits), "log_rows": len(log_hs),
             "in_sit": bool(sit_hs), "sit_hits": sit_hits, "sit_rssi_min": sit_min,
-            "vr": bool(cat == "Glasses & VR" and VR_NAME.search(name or "")),
+            "vr": bool(cat == "Glasses & VR" and (VR_NAME.search(name or "") or "Meta Quest" in fleets)),
             "first": min(h["ts"] for h in hs), "last": max(h["last_ts"] or h["ts"] for h in hs),
             "rssi_max": max(rssis) if rssis else None,
             "rssi_med": round(statistics.median(log_rssis)) if log_rssis else None,
@@ -1520,6 +1652,7 @@ def build_devices(hears):
             "spread_m": round(spread), "places": len(cells),
             "travelled": bool(spread >= CFG["travel_min_m"] and len(cells) >= 2),
             "tracker_mode": tmode, "sensor": sensor,
+            "reclass": reclass,                       # the layer Fieldwatch's signature gave, when Harava moved it
             "phones": len({h.get("collector_id") for h in hs}),
         })
     # addresses that share a fingerprint: how many, and a name if any of them told it
@@ -2772,6 +2905,20 @@ def api_ids():
               "hits": hits.get(r["id"], 0), "devices": len(groups.get(r["id"], ())) or None,
               "local": bool(r.get("local"))}
              for r in HV_RULES]
+    rules = [{"id": k, "name": e["name"], "layer": e["layer"], "confidence": e["confidence"], "note": e["note"],
+               "match": {"builtin": "Apple Find My message (type 12): kind of device from its status byte"},
+               "hits": hits.get(k, 0), "devices": None, "local": False, "builtin": True}
+              for k, e in FINDMY_IDENTS.items()] + rules      # built in: checked before the rules
+    # Is the signature table still in step with Fieldwatch? Signature names in this data that the
+    # table does not know, and classes of the table that have no layer, mean Fieldwatch moved on.
+    sig_unknown, sig_nolayer = Counter(), Counter()
+    for d in devs:
+        for f in (d["fleets"] or "").split("+"):
+            c = SIG_CLASS_OVERRIDE.get(f) or SIG_CLASS.get(f)
+            if f and c is None:
+                sig_unknown[f] += 1
+            elif f and c and c not in CLASS_CATEGORY:
+                sig_nolayer[f"{f} ({c})"] += 1
     pats = defaultdict(list)
     for d in still:
         pats[_pattern(d)].append(d)
@@ -2783,6 +2930,9 @@ def api_ids():
                "companies": len(BT["companies"]), "uuids": len(BT["uuids"]), "ad_types": len(BT["ad_types"])},
         "db": {"name": HV.get("name", ""), "version": HV.get("version", ""), "rules": len(HV_RULES),
                "local": len(LOCAL["rules"])},
+        "signatures": dict(SIG_META,
+                           unknown=[{"name": k, "radios": n} for k, n in sig_unknown.most_common()],
+                           no_layer=[{"name": k, "radios": n} for k, n in sig_nolayer.most_common()]),
         "counts": {"ble": len(ble), "fieldwatch_left": len(fw_left), "harava_identified": len(fw_left) - len(still),
                    "still_unidentified": len(still), "company_only": hits.get("company", 0),
                    "grouped_addresses": sum(1 for d in devs if d["group"] and d.get("group_size", 1) > 1),

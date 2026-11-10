@@ -300,6 +300,8 @@ table.grid tbody tr.mine td { color: var(--text-secondary); }
 /* timeline "Show" selector */
 .tl-cat { width: auto; padding: 1px 6px; font-size: 11px; text-transform: none; letter-spacing: 0; margin-left: 6px; }
 .tl-note { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--text-secondary); }
+.sig-warn { color: var(--amber); margin-top: 4px; }
+.sig-warn b { font-weight: 600; }
 .bt-gap-note { color: var(--amber); cursor: help; white-space: nowrap; }
 #timelinePanel.tl-filtered { border-color: var(--accent-dim); }
 
@@ -346,7 +348,7 @@ table.grid tbody tr.mine td { color: var(--text-secondary); }
 .id-med::after { content: " ·"; color: var(--amber); }
 .id-low { color: var(--text-secondary); font-style: italic; }
 .id-low::after { content: " ?"; color: var(--text-muted); font-style: normal; }
-.conf-pill { font-size: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; color: var(--text-secondary); font-weight: 400; }
+.conf-pill { font-size: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; color: var(--text-secondary); font-weight: 400; white-space: nowrap; }
 .id-h { font-size: 13px; color: var(--accent); font-weight: 600; margin: 4px 0 6px; }
 
 /* "Identified as" selector in Filter */

@@ -6,6 +6,54 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
 
 ---
 
+## [2026-11-10]
+
+### Added
+- **Apple Find My: the kind of device.** `findmy_info()` reads Apple message type 0x12 from the
+  manufacturer data: the length (0x19 separated / 0x02 near owner) and the status byte, whose bits
+  4–5 are the kind of device (0 Apple device, 1 AirTag, 2 Find My accessory, 3 AirPods) and bits
+  6–7 the battery, as read by AirGuard (seemoo-lab). `identify()` checks it before the rules and
+  returns one of the built-in identifications `FINDMY_IDENTS`: `findmy-apple-device`,
+  `findmy-apple-offline` (Phone / PC), `findmy-airpods` (Audio; kind 3, or kind 2 with a proximity
+  pairing message 0x07 in the same advertisement), `findmy-airtag`, `findmy-accessory` (Tracker; also
+  service data FD44 without message 0x12) and `findmy-unknown` (the AirTag signature without any
+  advertisement, i.e. Sit rows; stays Tracker). In `build_devices()` a radio with Fieldwatch's
+  *Apple AirTags* signature whose message says "not a tag" takes its layer from its other signatures
+  or from the identification; the new device field `reclass` holds the layer Fieldwatch gave, and
+  the radio panels show *layer by Harava*. Tracker mode and battery come from the same message.
+  `/api/ids` lists the built-in identifications with their hits. The Phone check does not count a
+  Find My address as a phone (the phone is counted by its other messages).
+  Reason: Fieldwatch's signature matches every Find My message; in the author's data of 8–10 Nov
+  320 of 352 "AirTag" addresses were Apple devices, 12 AirPods-type, 18 accessories, 0 AirTags of
+  kind 1.
+- **Following Fieldwatch.** `tools/update_fieldwatch_signatures.py` downloads Fieldwatch's stock
+  catalog (`dist/fieldwatch-signatures-v2.json`) and version note (`dist/app-update.json`) and
+  rewrites `signature_classes.json`, which now also carries `catalog`, `app_version`, `fetched` and
+  `retired` (names Fieldwatch removed; kept for old logs). `--check` only lists the differences
+  (new names, changed classes, classes without a layer in `CLASS_CATEGORY`) and exits 1 when there
+  are any. `/api/ids` returns `signatures` (catalog, app_version, fetched, names, `unknown`: signature
+  names in the data that the table lacks, `no_layer`: names whose class has no layer); the
+  Identification page and the phone app show the table's catalog and an amber warning for both.
+- `signature_classes.json` updated from catalog 100 to **103** (Fieldwatch 1.1.43): 10 new names,
+  268 in all. New class `TWO_WAY` → layer **Two-way radio** (Places & things, after Mesh radio in
+  `CLASS_PRIORITY`). `SIG_CLASS_OVERRIDE` keeps the new *Meta Quest* signature (a wearable in
+  Fieldwatch) on Glasses & VR, tagged *VR?*.
+- User guide 1.5 (*An "AirTag" is usually an iPhone*; *Keeping up with Fieldwatch*; the Two-way radio layer; figures of the Tracker layer and the Tracker
+  timeline retaken) and Mobile guide 1.4 (Watch list; Day and Watch list figures retaken).
+
+### Fixed
+- **Fieldwatch 1.1.43 logs.** From 1.1.43 (9 Nov 2026) the log's `raw` field is the whole
+  advertisement also when the row has manufacturer data; before, it was the manufacturer data.
+  `adv_features()` took it for manufacturer data whenever `mfg` was set, so the first byte (an AD
+  length such as 07 or 1E) was read as the message type: Apple Find My frames became "AirPods or
+  Beats", Nearby Info became "Apple device", Samsung, Google and Microsoft rules with a data prefix
+  missed, and `ruuvi_decode()` returned nothing. `adv_features()` now recognises the whole
+  advertisement (it splits into AD structures and one of them is the manufacturer data of the
+  row's own company) and reads the AD structures, service data and UUIDs from it; `mfg_payload()`
+  gives the manufacturer data in either form. On 9–10 Nov this changed the identification of 210
+  and 302 addresses.
+- `.conf-pill` no longer wraps inside the radio panel.
+
 ## [2026-11-09]
 
 ### Added

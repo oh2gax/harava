@@ -495,8 +495,8 @@ async function selectDevice(kind, mac, fly) {
         <div class="dev-mac">${esc(d.mac)}</div>
         <span class="pill" style="background:${col}">${esc(d.category)}</span><span class="pill ghost">${d.kind === 'WIFI' ? 'Wi-Fi ' + esc(d.band) : 'Bluetooth LE'}</span>${d.travelled ? '<span class="pill" style="background:#f59e0b">travelled ' + fmtM(d.spread_m) + '</span>' : ''}${d.phones > 1 ? '<span class="pill ghost">heard by ' + d.phones + ' phones</span>' : ''}
         <div class="kv">
-            <span>Signatures</span><b>${esc(d.fleets || '–')}</b>
-            ${d.ident ? `<span>Identified as</span><b>${identHtml(d)} <span class="conf-pill">${esc(d.ident_conf)}</span>${d.class === 'HARAVA' || !d.fleets ? ' <span style="color:var(--text-muted)">· Harava database</span>' : ''}</b>` : ''}
+            <span>Signatures</span><b>${esc(d.fleets || '–')}${d.reclass ? ` <span style="color:var(--text-muted);font-weight:400" title="Fieldwatch's signature put this radio on the ${esc(d.reclass)} layer. Harava read the advertisement and moved it: see Identified as.">· layer by Harava</span>` : ''}</b>
+            ${d.ident ? `<span>Identified as</span><b>${identHtml(d)} <span class="conf-pill">${esc(d.ident_conf)}</span>${d.class === 'HARAVA' || !d.fleets || d.reclass ? ' <span style="color:var(--text-muted)">· Harava database</span>' : ''}</b>` : ''}
             ${d.company ? `<span>Company</span><b>${esc(d.company)}</b>` : ''}
             <span>Vendor</span><b>${esc(d.vendor || '–')}</b>
             ${(d.group_size || 1) > 1 ? `<span>Same device</span><b class="acc">${d.group_size} addresses${d.group_name ? ' · named ' + esc(d.group_name) : ''}<div class="mono" style="color:var(--text-secondary);font-weight:400">${esc(groupLabel(d.group))}</div></b>` : ''}
@@ -863,7 +863,8 @@ async function loadIds() {
         <div class="mini-card"><span>Changing addresses → devices</span><b>${c.grouped_addresses.toLocaleString()} → ${c.grouped_devices}</b></div>`;
     $('idSource').innerHTML = `<b>${esc(r.db.name)}</b> version ${esc(r.db.version)} · ${r.db.rules} rules (<span class="mono">ids/harava_ids.json</span>)<br>
         Bluetooth SIG Assigned Numbers fetched ${esc(r.bt.fetched)}: ${r.bt.companies.toLocaleString()} company IDs, ${r.bt.uuids} service UUIDs, ${r.bt.ad_types} AD types
-        (<span class="mono">ids/bt_assigned_numbers.json</span>, refresh with <span class="mono">python tools/update_bt_numbers.py</span>)`;
+        (<span class="mono">ids/bt_assigned_numbers.json</span>, refresh with <span class="mono">python tools/update_bt_numbers.py</span>)` +
+        (r.signatures ? `<br>${sigTableHtml(r.signatures).line} (<span class="mono">signature_classes.json</span>, refresh with <span class="mono">python tools/update_fieldwatch_signatures.py</span>)${sigTableHtml(r.signatures).warn}` : '');
     const conf = { high: 'id-high', medium: 'id-med', low: 'id-low' };
     $('idRules').innerHTML = r.rules.map(x => `<tr title="${esc(x.note)}" style="cursor:default">
         <td class="mono">${esc(x.id)}</td><td><span class="${conf[x.confidence] || ''}">${esc(x.name)}</span></td>
@@ -876,6 +877,7 @@ async function loadIds() {
 }
 function matchText(m) {
     const parts = [];
+    if (m.builtin) parts.push(m.builtin);
     if (m.name_regex) parts.push(`name ~ ${m.name_regex}`);
     if (m.mfg) parts.push(`company ${m.mfg}` + (m.mfg_data_prefix ? ` data ${m.mfg_data_prefix}…` : ''));
     if (m.ad_type) parts.push(`AD ${m.ad_type}` + (m.ad_data_prefix ? ` ${m.ad_data_prefix}…` : ''));
