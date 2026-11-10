@@ -41,6 +41,22 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
 - User guide 1.5 (*An "AirTag" is usually an iPhone*; *Keeping up with Fieldwatch*; the Two-way radio layer; figures of the Tracker layer and the Tracker
   timeline retaken) and Mobile guide 1.4 (Watch list; Day and Watch list figures retaken).
 
+- **Home & IoT split.** Four layers of Harava's own, `EXTRA_LAYERS`: **TV & media**, **EV charger**,
+  **Printer**, **Sensor** (Places & things; in `CAT` of `common.js`, in `LAYERS` for the Workbench).
+  `SIG_LAYER` gives Fieldwatch signatures of class HOME a layer by name (LG webOS TV, Roku → TV &
+  media; HP, Epson → Printer; Ruuvi, Blue Maestro, SensorPush, RadiaCode → Sensor); `classify()`
+  uses it. Identification database 2026-11-10.1 (49 rules): the layers of `name-samsung-tv`,
+  `apple-airplay-target` (TV & media), `ev-charge-gatt`, `ev-charge-beacon` (EV charger),
+  `apple-airprint` (Printer) and `name-ruuvi` (Sensor) changed; new rules `name-tv` (BLE name says
+  TV, OLED, BRAVIA, [AV] or soundbar), `wifi-direct-tv` and `wifi-direct-printer` (the first rules
+  for Wi-Fi), `ev-charge-uuid-gatt` and `ev-charge-uuid-beacon`: a Mesh device that has not told
+  its name "Charge" but whose device UUID has the charge points' form (8 random bytes, 80, 7 zero
+  bytes) — all 28 named charge points have it — so a charge point heard only by its nameless
+  beacons no longer stays on Home & IoT. For this the rules got two match fields, `ad_data_regex`
+  and `service_data_regex` (regular expressions on the hex of the data). A rule may now set the layer of a Wi-Fi network that has no signature (before, only
+  of an unidentified Bluetooth radio). On 8–10 Nov: Home & IoT 111 devices → 26; TV & media 41,
+  EV charger 28, Printer 26, Sensor 7. Per day Home & IoT is 8, 13 and 8 devices.
+
 ### Fixed
 - **Fieldwatch 1.1.43 logs.** From 1.1.43 (9 Nov 2026) the log's `raw` field is the whole
   advertisement also when the row has manufacturer data; before, it was the manufacturer data.

@@ -880,8 +880,8 @@ function matchText(m) {
     if (m.builtin) parts.push(m.builtin);
     if (m.name_regex) parts.push(`name ~ ${m.name_regex}`);
     if (m.mfg) parts.push(`company ${m.mfg}` + (m.mfg_data_prefix ? ` data ${m.mfg_data_prefix}…` : ''));
-    if (m.ad_type) parts.push(`AD ${m.ad_type}` + (m.ad_data_prefix ? ` ${m.ad_data_prefix}…` : ''));
-    if (m.service_data_uuid) parts.push(`service data ${m.service_data_uuid}`);
+    if (m.ad_type) parts.push(`AD ${m.ad_type}` + (m.ad_data_prefix ? ` ${m.ad_data_prefix}…` : '') + (m.ad_data_regex ? ` ~ ${m.ad_data_regex}` : ''));
+    if (m.service_data_uuid) parts.push(`service data ${m.service_data_uuid}` + (m.service_data_regex ? ` ~ ${m.service_data_regex}` : ''));
     if (m.service_uuid_any) parts.push(`service ${m.service_uuid_any.join('/')}`);
     if (m.uuid128_any) parts.push(`service ${m.uuid128_any.map(u => u.slice(0, 8) + '…').join('/')}`);
     return parts.join(' · ');

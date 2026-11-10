@@ -2,7 +2,8 @@
    Classic script: everything here is a global of the page. */
 'use strict';
 
-// Device layers: one per Fieldwatch signature class (names match CLASS_CATEGORY in the server).
+// Device layers: one per Fieldwatch signature class (names match CLASS_CATEGORY in the server), plus
+// Harava's own splits of Home & IoT (EXTRA_LAYERS in the server: TV & media, EV charger, Printer, Sensor).
 // Watch-list layers get an icon pin on the map so they stand out from the dots.
 const CAT = [
     ['Watch list', 'Glasses & VR', '#e879f9', '🕶️'],
@@ -16,9 +17,13 @@ const CAT = [
     ['Personal', 'Wearable', '#c084fc'],
     ['Personal', 'Health', '#f472b6'],
     ['Places & things', 'Vehicle', '#f59e0b'],
+    ['Places & things', 'EV charger', '#0d9488'],
     ['Places & things', 'Camera', '#fbbf24'],
     ['Places & things', 'Smart lock', '#a3e635'],
     ['Places & things', 'Home & IoT', '#4ade80'],
+    ['Places & things', 'TV & media', '#6366f1'],
+    ['Places & things', 'Printer', '#db2777'],
+    ['Places & things', 'Sensor', '#65a30d'],
     ['Places & things', 'Thermostat', '#34d399'],
     ['Places & things', 'Shelf label / sign', '#22d3ee'],
     ['Places & things', 'Beacon', '#2dd4bf'],

@@ -1,6 +1,6 @@
 {
   "name": "Harava identification database",
-  "version": "2026-11-09.5",
+  "version": "2026-11-10.1",
   "description": "Harava's own rules for radios that Fieldwatch's signatures leave unidentified. Rules are tried in order; the first that matches wins. A rule only changes the layer of a radio that Fieldwatch did not identify; for the others it adds the 'Identified as' text. Company names come from bt_assigned_numbers.json (Bluetooth SIG).",
   "schema": {
     "match (all given conditions must hold)": {
@@ -10,6 +10,8 @@
       "mfg_data_prefix": "hex the manufacturer data (after the company ID) starts with",
       "ad_type": "advertising data type in the raw advertisement, 2 hex digits, e.g. 2B = Mesh Beacon",
       "ad_data_prefix": "hex the data of that AD structure starts with",
+      "ad_data_regex": "regular expression on the hex (upper case) of the data of that AD structure, for patterns a prefix cannot tell",
+      "service_data_regex": "regular expression on the hex of the Service Data of service_data_uuid",
       "service_data_uuid": "16-bit UUID of Service Data, 4 hex digits",
       "service_uuid_any": "list of 16-bit service UUIDs; one of them must be advertised",
       "uuid128_any": "list of 128-bit service UUIDs (8-4-4-4-12); one of them must be advertised"
@@ -33,13 +35,46 @@
     {
       "id": "name-samsung-tv",
       "name": "Samsung TV",
-      "layer": "Home & IoT",
+      "layer": "TV & media",
       "confidence": "high",
       "match": {
         "kind": "BLE",
         "name_regex": "\\[TV\\]|QLED|Samsung .*Series"
       },
       "note": "Samsung TVs advertise their model name."
+    },
+    {
+      "id": "name-tv",
+      "name": "TV or soundbar",
+      "layer": "TV & media",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "\\bTV\\b|\\bOLED\\b|BRAVIA|\\[AV\\]|Soundbar"
+      },
+      "note": "The advertised name says TV, OLED, BRAVIA or soundbar."
+    },
+    {
+      "id": "wifi-direct-tv",
+      "name": "TV (Wi-Fi Direct)",
+      "layer": "TV & media",
+      "confidence": "medium",
+      "match": {
+        "kind": "WIFI",
+        "name_regex": "^DIRECT-.*(\\[TV\\]|BRAVIA|\\bTV\\b)"
+      },
+      "note": "A TV's own Wi-Fi Direct network, used for screen mirroring and its remote."
+    },
+    {
+      "id": "wifi-direct-printer",
+      "name": "Printer (Wi-Fi Direct)",
+      "layer": "Printer",
+      "confidence": "medium",
+      "match": {
+        "kind": "WIFI",
+        "name_regex": "^DIRECT-..-?(HP|EPSON|Canon|Brother|Xerox|Lexmark|Kyocera|Ricoh)\\b|^HP-Print-|LaserJet|OfficeJet|DeskJet"
+      },
+      "note": "A printer's own Wi-Fi Direct network for printing without a router."
     },
     {
       "id": "name-hue",
@@ -92,7 +127,7 @@
     {
       "id": "ev-charge-gatt",
       "name": "EV charging point (DEFA?)",
-      "layer": "Home & IoT",
+      "layer": "EV charger",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -112,7 +147,7 @@
     {
       "id": "ev-charge-beacon",
       "name": "EV charging point (DEFA?)",
-      "layer": "Home & IoT",
+      "layer": "EV charger",
       "confidence": "medium",
       "match": {
         "kind": "BLE",
@@ -128,6 +163,45 @@
         "label": "Mesh device UUID"
       },
       "note": "A Bluetooth Mesh device named \"Charge\" that is waiting to be set up. Seen in numbers around a shared EV charging system of a housing company (most likely DEFA chargers, which are configured over Bluetooth); they advertise all day like mains-powered equipment. The maker is not confirmed by a public source, hence the question mark."
+    },
+    {
+      "id": "ev-charge-uuid-gatt",
+      "name": "EV charging point (DEFA?)",
+      "layer": "EV charger",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "service_data_uuid": "1827",
+        "service_data_regex": "^[0-9A-F]{16}80(00){7}"
+      },
+      "group": {
+        "source": "service_data",
+        "uuid": "1827",
+        "from": 0,
+        "to": 16,
+        "key": "mesh-device",
+        "label": "Mesh device UUID"
+      },
+      "note": "A Bluetooth Mesh device waiting to be set up, whose device UUID has the form of the charge points named \"Charge\" (eight random bytes, then 80 and seven zero bytes). It did not tell its name in this data; every device of this form whose name was heard later was a charge point. Another product built on the same radio module could look the same."
+    },
+    {
+      "id": "ev-charge-uuid-beacon",
+      "name": "EV charging point (DEFA?)",
+      "layer": "EV charger",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "ad_type": "2B",
+        "ad_data_regex": "^00[0-9A-F]{16}80(00){7}"
+      },
+      "group": {
+        "ad_type": "2B",
+        "from": 1,
+        "to": 17,
+        "key": "mesh-device",
+        "label": "Mesh device UUID"
+      },
+      "note": "A Bluetooth Mesh device waiting to be set up, whose device UUID has the form of the charge points named \"Charge\" (eight random bytes, then 80 and seven zero bytes). It did not tell its name in this data; every device of this form whose name was heard later was a charge point. Another product built on the same radio module could look the same."
     },
     {
       "id": "name-audio",
@@ -174,7 +248,7 @@
     {
       "id": "name-ruuvi",
       "name": "Ruuvi sensor",
-      "layer": "Home & IoT",
+      "layer": "Sensor",
       "confidence": "high",
       "match": {
         "kind": "BLE",
@@ -370,7 +444,7 @@
     {
       "id": "apple-airplay-target",
       "name": "Apple TV, HomePod or AirPlay speaker",
-      "layer": "Home & IoT",
+      "layer": "TV & media",
       "confidence": "high",
       "match": {
         "kind": "BLE",
@@ -447,7 +521,7 @@
     {
       "id": "apple-airprint",
       "name": "AirPrint printer",
-      "layer": "Home & IoT",
+      "layer": "Printer",
       "confidence": "medium",
       "match": {
         "kind": "BLE",

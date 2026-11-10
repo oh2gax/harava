@@ -370,9 +370,10 @@ Watch list & Glasses \& VR & Ray-Ban / Meta, Even G1, Snap Spectacles, Vuzix, Ra
 Personal & Phone / PC & Apple devices, Google, Microsoft (Windows PCs), Fast Pair, phone hotspots\\
  & Audio, Wearable, Health & earbuds and speakers; watches, rings, pendants; Dexcom, Omron\\
 \midrule
-Places \& things & Vehicle & Tesla, Audi MMI, BMW, CarPlay, tyre-pressure sensors\\
+Places \& things & Vehicle, EV charger & Tesla, Audi MMI, BMW, CarPlay, tyre-pressure sensors; EV charge points\\
  & Camera, Smart lock & Arlo, GoPro, Nest; SALTO, Yale, Nuki\\
- & Home \& IoT, Thermostat & Ruuvi, Govee, Amazon, Hue; ecobee, Nest\\
+ & Home \& IoT, Thermostat & Govee, Tuya, Amazon, Hue lamps, appliances; ecobee, Nest\\
+ & TV \& media, Printer, Sensor & Samsung and LG TVs, Roku, soundbars; HP, Epson, AirPrint; Ruuvi, SensorPush\\
  & Shelf label / sign, Beacon, Mesh radio & electronic shelf labels; iBeacon, Estimote; Meshtastic, goTenna\\
  & Two-way radio & Icom ID-52, Bluetooth speaker-microphones of Icom, Yaesu and Kenwood, PTT buttons\\
 \midrule
@@ -380,7 +381,7 @@ Background & Network & Wi-Fi access points and routers\\
  & Unidentified & no signature matched: most random Bluetooth addresses\\
 \bottomrule
 \end{tabularx}
-\caption{The device layers. A radio that matches several signatures goes to the layer highest in this list (a tracker before a phone).}
+\caption{The device layers. A radio that matches several signatures goes to the layer highest in this list (a tracker before a phone). \emph{EV charger}, \emph{TV \& media}, \emph{Printer} and \emph{Sensor} are Harava's own: Fieldwatch files such radios under Home \& IoT.}
 \end{table}
 
 \infobox{Glasses \& VR.}{Smart glasses and VR headsets share one layer, because Meta uses the same Bluetooth identity for its Ray-Ban glasses and its Quest headsets; Fieldwatch's \emph{Ray-Ban / Meta glasses} signature matches both. When the name says \emph{Quest}, \emph{Oculus}, \emph{Pico}, \emph{Vive} or \emph{Vision Pro}, Harava adds a \textbf{VR?} tag and a note. Glasses usually advertise without a name. On 8 November the only hit was ``Quest 3'', heard once at $-96$\dBm\ when leaving home --- most likely a neighbour's headset.}

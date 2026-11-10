@@ -257,6 +257,15 @@ CLASS_CATEGORY = {
     "TWO_WAY": "Two-way radio",
     "ISP": "Network",
 }
+# Layers that are not a Fieldwatch class of their own. Fieldwatch files TVs, printers and sensors
+# under HOME; Harava gives these signatures a layer by name, and its own rules (ids/harava_ids.json)
+# name the same layers. Everything else of the class stays on Home & IoT.
+EXTRA_LAYERS = ["TV & media", "EV charger", "Printer", "Sensor"]
+SIG_LAYER = {
+    "LG webOS TV": "TV & media", "Roku": "TV & media",
+    "HP": "Printer", "Epson": "Printer",
+    "Ruuvi": "Sensor", "Blue Maestro": "Sensor", "SensorPush": "Sensor", "RadiaCode": "Sensor",
+}
 CLASS_PRIORITY = ["HACKING", "SURVEILLANCE", "LAW_ENFORCEMENT", "DRONE", "GLASSES", "FINDER",
                   "VEHICLE", "CAMERA", "LOCK", "MESH", "TWO_WAY", "WEARABLE", "HEALTH", "AUDIO", "HOME",
                   "THERMOSTAT", "SIGNAGE", "BEACON", "PHONE", "ISP"]
@@ -1182,6 +1191,13 @@ def load_ids():
             except re.error as e:
                 status.setdefault("rule errors", []).append(f"{r.get('id')}: {e}")
                 continue
+        try:                                      # regular expressions on the hex of the data (upper case)
+            for k in ("ad_data_regex", "service_data_regex"):
+                if m.get(k):
+                    m["_" + k] = re.compile(m[k], re.I)
+        except re.error as e:
+            status.setdefault("rule errors", []).append(f"{r.get('id')}: {e}")
+            continue
         for k in ("mfg", "service_data_uuid"):
             if m.get(k):
                 m[k] = m[k].upper().zfill(4)
@@ -1290,7 +1306,12 @@ def _rule_matches(m, kind, name, f):
             return False
         if m.get("ad_data_prefix") and not any(d.hex().upper().startswith(m["ad_data_prefix"]) for d in hit):
             return False
+        if m.get("_ad_data_regex") and not any(m["_ad_data_regex"].search(d.hex().upper()) for d in hit):
+            return False
     if m.get("service_data_uuid") and m["service_data_uuid"] not in f["sd"]:
+        return False
+    if m.get("_service_data_regex") and not m["_service_data_regex"].search(
+            f["sd"].get(m.get("service_data_uuid", ""), b"").hex().upper()):
         return False
     if m.get("service_uuid_any") and not (m["service_uuid_any"] & f["svc"]):
         return False
@@ -1437,7 +1458,9 @@ def classify(fleets, name, kind):
     classes = [SIG_CLASS_OVERRIDE.get(f) or SIG_CLASS.get(f, "") for f in names]
     for c in CLASS_PRIORITY:
         if c in classes:
-            return c, CLASS_CATEGORY[c]
+            # a signature of this class with a layer of its own (a TV, a printer, a sensor)
+            own = next((SIG_LAYER[f] for f, k in zip(names, classes) if k == c and f in SIG_LAYER), None)
+            return c, own or CLASS_CATEGORY[c]
     if kind == "BLE" and VR_NAME.search(name or ""):
         return "GLASSES", CLASS_CATEGORY["GLASSES"]
     if VEHICLE_NAME.search(name or ""):
@@ -1622,8 +1645,10 @@ def build_devices(hears):
                 # (the class stays a Fieldwatch class: Fieldwatch did name this radio, only too broadly)
                 cls, cat = (cls2, cat2) if cat2 != "Unidentified" else \
                     ({"Phone / PC": "PHONE", "Audio": "AUDIO"}.get(hv["layer"], "HARAVA"), hv["layer"])
-        if hv and cat == "Unidentified" and hv["layer"]:
-            cls, cat = "HARAVA", hv["layer"]          # Harava's own database identified it
+        if hv and hv["layer"] and (cat == "Unidentified" or (kind == "WIFI" and not fleet_s)):
+            # Harava's own database identified it (a Wi-Fi network without a signature is only
+            # "Network" for want of anything better: a rule may say it is a TV's or a printer's own)
+            cls, cat = "HARAVA", hv["layer"]
         tmode = ""
         if cat == "Tracker":
             fm = (hv or {}).get("findmy") or {}
@@ -3274,7 +3299,7 @@ def api_wb_note():
 
 _HEX = re.compile(r"^[0-9A-F]*$")
 _UUID128 = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
-LAYERS = sorted(set(CLASS_CATEGORY.values()) - {"Network"})
+LAYERS = sorted((set(CLASS_CATEGORY.values()) | set(EXTRA_LAYERS)) - {"Network"})
 
 
 def _clean_rule(r, need_meta=True):
