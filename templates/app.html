@@ -341,7 +341,7 @@
 <div id="toast"></div>
 <script>
 window.FWA = {layers: {{ layers|tojson }}, role: {{ user.role|tojson }}, open: {{ (user.open or false)|tojson }}, appName: {{ app_name|tojson }},
-               version: {{ version|tojson }}, build: {{ build|tojson }}, travelMin: {{ travel_min_m }},
+               version: {{ version|tojson }}, build: {{ build|tojson }}, travelMin: {{ travel_min_m }}, maxUploadMb: {{ max_upload_mb }},
                cartoApiKey: {{ carto_api_key|tojson }} };
 </script>
 <script src="{{ url_for('static', filename='common.js', v=build) }}"></script>

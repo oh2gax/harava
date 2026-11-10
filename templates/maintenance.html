@@ -90,6 +90,8 @@ const ROLES = {{ roles|tojson }};
 let ME = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// a text as an argument of an inline handler: esc() alone is not enough there (see static/common.js)
+const jsArg = v => esc(JSON.stringify(String(v ?? '')));
 const fmt = ts => ts ? ts.replace('T', ' ').slice(0, 16) : '—';
 
 async function call(url, opts) {
@@ -112,8 +114,8 @@ async function load() {
             `<option value="${k}"${k === u.role ? ' selected' : ''}>${v}</option>`).join('')}</select></td>
         <td><label class="switch"><input type="checkbox" ${u.active ? 'checked' : ''} ${u.id === ME ? 'disabled' : ''} onchange="edit(${u.id}, {active: this.checked})"><span></span></label></td>
         <td>${fmt(u.last_login)}</td>
-        <td class="actions"><button class="btn ghost" onclick="resetPw(${u.id}, '${esc(u.username)}')">New password</button>
-            ${u.id === ME ? '' : `<button class="btn danger" onclick="delUser(${u.id}, '${esc(u.username)}')">Remove</button>`}</td></tr>`).join('')
+        <td class="actions"><button class="btn ghost" onclick="resetPw(${Number(u.id)}, ${jsArg(u.username)})">New password</button>
+            ${u.id === ME ? '' : `<button class="btn danger" onclick="delUser(${Number(u.id)}, ${jsArg(u.username)})">Remove</button>`}</td></tr>`).join('')
         || '<tr><td colspan="7" class="empty">No users yet.</td></tr>';
     $('logBody').innerHTML = d.log.map(l => `<tr class="${l.event.startsWith('failed') ? 'bad' : ''}">
         <td>${fmt(l.ts)}</td><td>${esc(l.username)}</td><td class="mono">${esc(l.ip)}</td><td>${esc(l.event)}</td></tr>`).join('')
@@ -128,7 +130,7 @@ function showTemp(user, pw, what) {
     alertDlg(`<h3>${what}</h3><p>One-time password for <b>${esc(user)}</b>:</p>
         <div class="temp-pw" id="tempPw">${esc(pw)}</div>
         <p class="note">It is shown only now. ${esc(user)} must choose an own password at the next sign-in.</p>
-        <button class="btn ghost" onclick="navigator.clipboard.writeText('${esc(pw)}').then(() => this.textContent = 'Copied ✓')">Copy</button>`);
+        <button class="btn ghost" onclick="navigator.clipboard.writeText(${jsArg(pw)}).then(() => this.textContent = 'Copied ✓')">Copy</button>`);
 }
 async function addUser(ev) {
     ev.preventDefault();
@@ -169,7 +171,7 @@ async function loadSnaps() {
         <td>${fmt(x.created)}</td><td>${esc(x.made_by)}</td>
         <td>${esc(x.contents)}${x.imports != null ? ` · ${x.imports} imports · ${Number(x.hears).toLocaleString('en-GB')} hears` : ''}</td>
         <td>${x.first ? fmt(x.first) + ' → ' + fmt(x.last) : '—'}</td><td>${kb(x.size)}</td>
-        <td class="actions"><button class="btn danger" onclick="delSnap('${esc(x.name)}')">Delete</button></td></tr>`).join('')
+        <td class="actions"><button class="btn danger" onclick="delSnap(${jsArg(x.name)})">Delete</button></td></tr>`).join('')
         || '<tr><td colspan="7" class="empty">No snapshots yet.</td></tr>';
 }
 async function makeSnap() {

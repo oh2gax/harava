@@ -71,6 +71,9 @@ CONFIG_DEFAULTS = {
     "session_days": "30",
     # keep every uploaded export (gzip) in archive/<user>/ so it can be read again (Re-read)
     "keep_originals": "true",
+    # the largest upload (MB). An import needs about 15 times the file's size in memory for a
+    # moment, so keep this well below the memory of a small server.
+    "max_upload_mb": "100",
 }
 
 
@@ -96,6 +99,7 @@ def load_config():
         "behind_proxy": c.getboolean("behind_proxy"),
         "session_days": c.getint("session_days"),
         "keep_originals": c.getboolean("keep_originals"),
+        "max_upload_mb": max(1, c.getint("max_upload_mb")),
     }
 
 
@@ -547,12 +551,21 @@ def freq_band(freq, kind):
     return "6 GHz"
 
 
+_MAC_FULL = re.compile(r"[0-9A-F]{2}(?::[0-9A-F]{2}){5}")
+
+
 def norm_hear(d):
-    """Return a hear dict with every column, normalised."""
-    kind = (d.get("kind") or "").upper().replace("-", "")
-    if kind not in ("WIFI", "BLE"):
-        kind = "BLE" if "BLE" in kind else ("WIFI" if "WIFI" in kind else kind or "BLE")
-    mac = (d.get("mac") or "").upper()
+    """Return a hear dict with every column, normalised. An export is outside data: the radio kind is
+    only ever WIFI or BLE, and an address that is not a real one becomes "" (the importers skip such
+    rows), so nothing but an address can reach the pages through these two fields."""
+    kind = str(d.get("kind") or "").upper().replace("-", "")
+    kind = "WIFI" if "WIFI" in kind else "BLE"
+    mac = str(d.get("mac") or "").strip().upper().replace("-", ":")
+    if not _MAC_FULL.fullmatch(mac):
+        mac = ""
+    oui = str(d.get("oui") or "").strip().upper()
+    if not re.fullmatch(r"[0-9A-F]{2}(?::[0-9A-F]{2}){0,5}", oui):
+        oui = mac[:8]
     lat, lon = to_float(d.get("lat")), to_float(d.get("lon"))
     if lat is not None and lon is not None and abs(lat) < 1e-9 and abs(lon) < 1e-9:
         lat = lon = None
@@ -564,7 +577,7 @@ def norm_hear(d):
         "rssi": to_int(d.get("rssi")),
         "channel": to_int(d.get("channel"), 0),
         "freq": to_int(d.get("freq"), 0),
-        "oui": (d.get("oui") or mac[:8]).upper(),
+        "oui": oui,
         "vendor": clean_text(d.get("vendor")).strip(),
         "fleets": clean_text(d.get("fleets")).strip(),
         "mfg": clean_text(d.get("mfg")).strip(),
@@ -1125,6 +1138,12 @@ def scan_folder(folder, owner_id=0, collector_id=None):
     return results
 
 
+# One upload (and one export inside a zip) may be at most max_upload_mb: the importer holds the whole
+# file as rows in memory, about 15 times its size (measured: 95 MB export, 473,000 rows -> 1.4 GB).
+MAX_UPLOAD = CFG["max_upload_mb"] * 1024 * 1024
+ZIP_MAX_FILES, ZIP_MAX_BYTES = 500, 1024 * 1024 * 1024
+
+
 def import_upload(filename, data, owner_id=0, collector_id=None):
     """One uploaded file; a .zip is opened and its exports imported oldest first."""
     if filename.lower().endswith(".zip"):
@@ -1132,12 +1151,25 @@ def import_upload(filename, data, owner_id=0, collector_id=None):
             zf = zipfile.ZipFile(io.BytesIO(data))
         except zipfile.BadZipFile:
             return [{"file": filename, "status": "error", "reason": "not a readable zip file"}]
-        members = sorted((i for i in zf.infolist() if not i.is_dir() and _importable(i.filename)
-                          and i.file_size < 512 * 1024 * 1024), key=lambda i: (i.date_time, i.filename))
+        members = sorted((i for i in zf.infolist() if not i.is_dir() and _importable(i.filename)),
+                         key=lambda i: (i.date_time, i.filename))
         if not members:
             return [{"file": filename, "status": "error", "reason": "no Fieldwatch exports in the zip"}]
-        return [dict(import_bytes(os.path.basename(i.filename), zf.read(i), None, owner_id, collector_id),
-                     folder=filename) for i in members]
+        # a zip can unpack to far more than it weighs: refuse one that would not fit in memory
+        if len(members) > ZIP_MAX_FILES or sum(i.file_size for i in members) > ZIP_MAX_BYTES:
+            return [{"file": filename, "status": "error",
+                     "reason": f"the zip is too big: at most {ZIP_MAX_FILES} exports and "
+                               f"{ZIP_MAX_BYTES // (1024 * 1024)} MB unpacked"}]
+        out = []
+        for i in members:                    # one at a time, so only one export is in memory
+            fn = os.path.basename(i.filename)
+            if i.file_size > MAX_UPLOAD:
+                r = {"file": fn, "status": "error",
+                     "reason": f"{i.file_size / 1048576:.0f} MB unpacked; the limit is {CFG['max_upload_mb']} MB"}
+            else:
+                r = import_bytes(fn, zf.read(i), None, owner_id, collector_id)
+            out.append(dict(r, folder=filename))
+        return out
     return [import_bytes(filename, data, None, owner_id, collector_id)]
 
 
@@ -1757,7 +1789,13 @@ def range_args():
 # ─────────────────────────── web app ───────────────────────────
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD + 1024 * 1024      # the files plus the form around them
+
+
+@app.errorhandler(413)
+def _too_large(_e):
+    return jsonify({"error": f"The upload is too large: at most {CFG['max_upload_mb']} MB at a time. "
+                             "Send the files in smaller lots."}), 413
 
 
 # ───────────────────────── users and sign-in ─────────────────────────
@@ -2217,10 +2255,14 @@ def admin_cli():
 @app.route("/")
 def index():
     wf = CFG["watch_folder"]
-    if os.path.commonpath([os.path.abspath(wf), HERE]) == HERE:
-        wf = os.path.relpath(wf, HERE)                      # e.g. "data", inside Harava's folder
+    try:
+        if os.path.commonpath([os.path.abspath(wf), HERE]) == HERE:
+            wf = os.path.relpath(wf, HERE)                  # e.g. "data", inside Harava's folder
+    except ValueError:                                      # Windows: the folder is on another drive
+        pass
     return render_template("index.html", version=APP_VERSION, app_name=APP_NAME,
                            watch_folder=wf, travel_min_m=int(CFG["travel_min_m"]),
+                           max_upload_mb=CFG["max_upload_mb"],
                            carto_api_key=CARTO_API_KEY, user=current_user())
 
 
@@ -2253,7 +2295,8 @@ def _static_build():
 def app_page():
     return render_template("app.html", app_name=APP_NAME, version=APP_VERSION, build=_app_build(),
                            user=current_user(), carto_api_key=CARTO_API_KEY,
-                           travel_min_m=int(CFG["travel_min_m"]), layers=LAYERS)
+                           travel_min_m=int(CFG["travel_min_m"]), layers=LAYERS,
+                           max_upload_mb=CFG["max_upload_mb"])
 
 
 @app.route("/api/app/build")
@@ -2492,6 +2535,14 @@ def api_device():
     })
 
 
+def _csv_text(v):
+    """A name heard on the air may start with = + - or @, which a spreadsheet would run as a formula:
+    such text gets an apostrophe in front (numbers are left alone)."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
 @app.route("/api/export.csv")
 def api_export():
     t_from, t_to = range_args()
@@ -2512,7 +2563,7 @@ def api_export():
             v = d.get(c)
             if c in ("first", "last") and v:
                 v = datetime.fromtimestamp(v / 1000).strftime("%Y-%m-%d %H:%M:%S")
-            row.append("" if v is None else v)
+            row.append("" if v is None else _csv_text(v))
         w.writerow(row)
     name = "devices-export-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
     return Response(buf.getvalue().encode("utf-8-sig"), mimetype="text/csv",

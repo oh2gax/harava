@@ -43,6 +43,20 @@ const CAT_ICON = Object.fromEntries(CAT.filter(c => c[3]).map(c => [c[1], c[3]])
 const CAT_ORDER = CAT.map(c => c[1]);
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// A text as an argument of an inline handler (onclick="f(${jsArg(x)})"): esc() alone is not enough
+// there, because the browser turns &#39; back into a quote before it runs the handler.
+const jsArg = v => esc(JSON.stringify(String(v ?? '')));
+// Uploads: the server takes at most FWA.maxUploadMb at a time (max_upload_mb in config.ini).
+// Returns the message to show when these files are over it, '' when they fit.
+function uploadTooBig(files) {
+    const max = Number((window.FWA || {}).maxUploadMb) || 0, mb = b => (b / 1048576).toFixed(0);
+    if (!max) return '';
+    const list = [...files], big = list.find(f => f.size > max * 1048576);
+    if (big) return `${big.name} is ${mb(big.size)} MB; the limit is ${max} MB.`;
+    const sum = list.reduce((a, f) => a + f.size, 0);
+    return sum > max * 1048576 ? `These files are ${mb(sum)} MB together; at most ${max} MB at a time. Send them in smaller lots.` : '';
+}
+const TOO_LARGE = () => `The upload is too large: at most ${(window.FWA || {}).maxUploadMb || '?'} MB at a time.`;
 const pad = n => String(n).padStart(2, '0');
 function fmtTime(ms, withDate) {
     if (!ms) return '';

@@ -37,7 +37,11 @@ async function api(url, opts) {
         if (j.account) { location.href = j.account; }
         throw new Error(j.error || 'not allowed');
     }
-    if (!r.ok) { const t = await r.text(); let m = t; try { m = JSON.parse(t).error || t; } catch (_) { /* text */ } throw new Error(m); }
+    if (!r.ok) {
+        const t = await r.text(); let m = t;
+        try { m = JSON.parse(t).error || t; } catch (_) { if (r.status === 413) m = TOO_LARGE(); }   // 413 from nginx is a web page
+        throw new Error(m);
+    }
     return r.json();
 }
 async function signOut() {
@@ -171,7 +175,7 @@ function renderOwn() {
     $('ownBody').innerHTML = S.own.map((r, i) => `<tr style="cursor:default">
         <td><b>${esc(r.label)}</b></td><td>${kindTxt[r.kind || '']}</td><td>${OWN_MATCH_TXT[r.match]}</td>
         <td class="mono">${esc(r.value)}</td><td class="num">${counts[i]}</td>
-        <td><button class="btn danger needs-analyze" onclick="delOwn(${r.id}, '${esc(r.label).replace(/'/g, "\\'")}')">Remove</button></td></tr>`).join('')
+        <td><button class="btn danger needs-analyze" onclick="delOwn(${Number(r.id)}, ${jsArg(r.label)})">Remove</button></td></tr>`).join('')
         || '<tr><td colspan="6" class="empty" style="padding:14px">No devices marked as yours yet.</td></tr>';
 }
 function prefillOwn(kind, mac) {
@@ -349,11 +353,11 @@ function renderChips() {
     const c = catCounts();
     let html = '', group = '';
     CAT.forEach(([g, k]) => {
-        if (g !== group) { group = g; html += `<div class="lay-group" onclick="soloGroup('${g}')" title="Show only ${g}">${g}</div>`; }
-        const n = c[k] || 0, k2 = k.replace(/'/g, "\\'");
+        if (g !== group) { group = g; html += `<div class="lay-group" onclick="soloGroup(${jsArg(g)})" title="Show only ${esc(g)}">${esc(g)}</div>`; }
+        const n = c[k] || 0, k2 = jsArg(k);
         html += `<div class="lay-row ${n ? '' : 'zero'}">
-            <label class="switch"><input type="checkbox" ${S.hiddenCats.has(k) ? '' : 'checked'} onchange="toggleCat('${k2}')"><span></span></label>
-            ${catMark(k)}<span class="lay-name" onclick="soloCat('${k2}')" title="Show only ${esc(k)}">${esc(k)}</span>
+            <label class="switch"><input type="checkbox" ${S.hiddenCats.has(k) ? '' : 'checked'} onchange="toggleCat(${k2})"><span></span></label>
+            ${catMark(k)}<span class="lay-name" onclick="soloCat(${k2})" title="Show only ${esc(k)}">${esc(k)}</span>
             <small>${n}</small></div>`;
     });
     $('catChips').innerHTML = html;
@@ -362,7 +366,7 @@ function renderCats() {
     const c = catCounts();
     const max = Math.max(1, ...Object.values(c));
     $('catList').innerHTML = CAT_ORDER.filter(k => c[k]).map(k =>
-        `<div class="cat-row ${S.hiddenCats.has(k) ? 'off' : ''}" onclick="toggleCat('${k.replace(/'/g, "\\'")}')"><span>${CAT_ICON[k] ? CAT_ICON[k] + ' ' : ''}${esc(k)}</span>
+        `<div class="cat-row ${S.hiddenCats.has(k) ? 'off' : ''}" onclick="toggleCat(${jsArg(k)})"><span>${CAT_ICON[k] ? CAT_ICON[k] + ' ' : ''}${esc(k)}</span>
          <div class="cat-bar"><i style="width:${100 * c[k] / max}%;background:${CAT_COLORS[k]}"></i></div><b>${c[k]}</b></div>`).join('')
         || '<div class="note">No devices in this range.</div>';
 }
@@ -522,7 +526,7 @@ async function selectDevice(kind, mac, fly) {
         <div class="note">Dots on the map: every place your phone heard this radio (dashed line in time order).</div>
         ${ownMatch(d)
             ? `<div class="note" style="color:var(--amber)">★ My device: <b>${esc(ownMatch(d).label)}</b> (change it in Devices → My devices)</div>`
-            : `<button class="btn ghost needs-analyze" style="margin-top:8px;width:100%" onclick="prefillOwn('${d.kind}','${d.mac}')">＋ Mark as my device</button>`}`;
+            : `<button class="btn ghost needs-analyze" style="margin-top:8px;width:100%" onclick="prefillOwn(${jsArg(d.kind)},${jsArg(d.mac)})">＋ Mark as my device</button>`}`;
     P.classList.remove('hidden');
     const pts = r.hears.filter(h => h.lat != null);
     if (pts.length) {
@@ -563,7 +567,7 @@ const COLS = [
 const TABLE_MAX = 1500;
 function renderTable(list) {
     $('devHead').innerHTML = '<th title="My devices: ＋ marks a radio as yours" style="cursor:default">★</th>' +
-        COLS.map(c => `<th class="${S.sort.key === c.k ? 'sorted' : ''}" onclick="sortBy('${c.k}')">${c.t}${S.sort.key === c.k ? (S.sort.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('');
+        COLS.map(c => `<th class="${S.sort.key === c.k ? 'sorted' : ''}" data-k="${esc(c.k)}" onclick="sortBy(this.dataset.k)">${c.t}${S.sort.key === c.k ? (S.sort.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('');
     const k = S.sort.key, dir = S.sort.dir;
     const rows = [...list].sort((a, b) => {
         const x = a[k] ?? '', y = b[k] ?? '';
@@ -584,13 +588,13 @@ function renderTable(list) {
             (d.sensor ? `<span class="tag grn">${d.sensor.temp_c.toFixed(1)} °C</span>` : '');
         const ownCell = d.own
             ? `<span class="own-star" title="My device: ${esc(d.own)}">★</span>`
-            : `<button class="own-add needs-analyze" title="Mark as my device" onclick="event.stopPropagation(); prefillOwn('${d.kind}','${d.mac}')">＋</button>`;
-        return `<tr data-key="${key}" class="${key === sel ? 'sel' : ''}${d.own ? ' mine' : ''}" onclick="openFromTable('${d.kind}','${d.mac}')">
+            : `<button class="own-add needs-analyze" title="Mark as my device" onclick="event.stopPropagation(); prefillOwn(${jsArg(d.kind)},${jsArg(d.mac)})">＋</button>`;
+        return `<tr data-key="${esc(key)}" class="${key === sel ? 'sel' : ''}${d.own ? ' mine' : ''}" onclick="openFromTable(${jsArg(d.kind)},${jsArg(d.mac)})">
             <td class="own-cell">${ownCell}</td>
             <td><span class="cdot" style="background:${CAT_COLORS[d.category]}"></span>${esc(d.category)}</td>
             <td>${d.kind === 'WIFI' ? 'Wi-Fi' : 'BLE'}</td>
             <td title="${esc(d.name)}">${esc(d.name)}${tags}</td>
-            <td class="mono">${d.mac}</td>
+            <td class="mono">${esc(d.mac)}</td>
             <td title="${esc(d.ident_note || '')}">${identHtml(d)}</td>
             <td title="${esc(d.company || d.vendor)}">${esc(d.company || d.vendor)}</td>
             <td title="${esc(d.fleets)}">${esc(d.fleets)}</td>
@@ -610,7 +614,12 @@ function openFromTable(kind, mac) { showView('map'); selectDevice(kind, mac, tru
 function exportCsv() {
     const list = filtered();
     const cols = ['own', 'kind', 'mac', 'name', 'vendor', 'category', 'ident', 'ident_conf', 'company', 'group', 'group_size', 'fleets', 'hears', 'log_rows', 'sit_hits', 'first', 'last', 'rssi_max', 'rssi_med', 'channel', 'freq', 'band', 'flags', 'spread_m', 'places', 'travelled', 'tracker_mode', 'lat', 'lon', 'mfg', 'uuids', 'raw'];
-    const q = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    // a name heard on the air may start with = + - or @, which a spreadsheet would run as a formula
+    const q = v => {
+        if (typeof v === 'string' && /^[=+\-@\t\r]/.test(v)) v = "'" + v;
+        v = v == null ? '' : String(v);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
     const lines = [cols.join(',')].concat(list.map(d => cols.map(c => q(c === 'first' || c === 'last' ? fmtTime(d[c], true) : d[c])).join(',')));
     const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -676,7 +685,7 @@ function runPhoneCheck() {
     const zl = { box: '<span class="tag grn">in box</span>', room: '<span class="tag red">in room</span>', out: '<span class="tag">weak</span>' };
     const order = { room: 0, box: 1, out: 2 };
     $('pcBody').innerHTML = [...ph].sort((a, b) => order[a.zone] - order[b.zone] || b.rssi - a.rssi).map(x =>
-        `<tr onclick="openFromTable('${x.d.kind}','${x.d.mac}')"><td>${zl[x.zone]}</td><td>${x.type}</td><td>${esc(x.d.name)}</td><td class="mono">${x.d.mac}</td>
+        `<tr onclick="openFromTable(${jsArg(x.d.kind)},${jsArg(x.d.mac)})"><td>${zl[x.zone]}</td><td>${x.type}</td><td>${esc(x.d.name)}</td><td class="mono">${esc(x.d.mac)}</td>
          <td class="num">${x.rssi}</td><td class="num">${x.d.hears}</td><td>${fmtTime(x.d.first)}</td><td>${fmtTime(x.d.last)}</td></tr>`).join('')
         || '<tr><td colspan="8" class="empty">No phones found in this window.</td></tr>';
     // histogram, 2 dB bins
@@ -740,7 +749,7 @@ async function loadImports() {
         <td>${i.shared_with ? esc(i.shared_with) : '<span class="sub2">private</span>'}</td>
         <td class="acts"><div class="acts-in">${i.can_edit && window.FWA.role !== 'view' ? `${i.mine && !window.FWA.open ? `<button class="btn ghost" onclick="openShare(${i.id})">Share</button>` : ''}
             ${i.rereadable ? `<button class="btn ghost" onclick="rereadImport(${i.id})" title="Read the kept original file again">Re-read</button>` : ''}
-            <button class="btn danger" onclick="deleteImport(${i.id}, '${esc(i.filename)}')">Delete</button>` : ''}</div></td></tr>`).join('')
+            <button class="btn danger" onclick="deleteImport(${Number(i.id)}, ${jsArg(i.filename)})">Delete</button>` : ''}</div></td></tr>`).join('')
         || '<tr><td colspan="9" class="empty">Nothing imported yet. Drop files above.</td></tr>';
     drawCoverage(r.imports);
 }
@@ -771,6 +780,8 @@ function showResults(res) {
 }
 async function uploadFiles(files) {
     if (!files.length) return;
+    const big = uploadTooBig(files);
+    if (big) { $('impResults').innerHTML = `<div class="err">✖ ${esc(big)}</div>`; toast('Too large to upload'); return; }
     const fd = new FormData();
     [...files].sort((a, b) => a.lastModified - b.lastModified).forEach(f => fd.append('files', f));   // oldest first
     if ($('impPhone').value) fd.append('collector', $('impPhone').value);

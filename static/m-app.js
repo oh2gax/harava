@@ -40,7 +40,7 @@
     if (r.status === 401) { location.href = '/login?next=/app'; throw new Error('sign in first'); }
     const j = await r.json().catch(() => ({}));
     if (r.status === 403 && j.account) { location.href = j.account; }
-    if (!r.ok) throw new Error(j.error || String(r.status));
+    if (!r.ok) throw new Error(j.error || (r.status === 413 ? TOO_LARGE() : String(r.status)));
     return j;
   }
   function toast(msg) {
@@ -371,7 +371,7 @@
   function devRow(d, extra) {
     const name = d.name || (d.kind === 'WIFI' ? '(hidden network)' : '(no name)');
     const what = d.ident || d.fleets || d.vendor || '';
-    return `<div class="app-card m-dev${d.own ? ' own' : ''}"><button type="button" class="hd" data-k="${d.kind}" data-m="${esc(d.mac)}">
+    return `<div class="app-card m-dev${d.own ? ' own' : ''}"><button type="button" class="hd" data-k="${esc(d.kind)}" data-m="${esc(d.mac)}">
       <div class="l1"><span class="cdot" style="background:${CAT_COLORS[d.category] || '#94a3b8'}"></span><b>${CAT_ICON[d.category] ? CAT_ICON[d.category] + ' ' : ''}${esc(name)}</b>
         <span class="rssi">${d.rssi_max ?? '?'} dBm</span></div>
       <div class="l2">${esc(d.category)}${what ? ' · ' + esc(what) : ''} · ${d.hears} hears · ${whenTxt(d.last)}</div>
@@ -747,6 +747,8 @@
   $('m-imp-file').addEventListener('change', async e => {
     const files = [...e.target.files].sort((a, b) => a.lastModified - b.lastModified); e.target.value = '';
     if (!files.length) return;
+    const big = uploadTooBig(files);
+    if (big) { $('m-imp-res').innerHTML = `<div class="err">✖ ${esc(big)}</div>`; return; }
     const fd = new FormData(); files.forEach(f => fd.append('files', f));
     if ($('m-imp-phone').value) fd.append('collector', $('m-imp-phone').value);
     await uploadFormData(fd, files.length, $('m-imp-res'));
@@ -799,6 +801,8 @@
       body.innerHTML = names + '<div class="err">Importing needs the <i>Analyze</i> permission. Ask the admin.</div>';
       await dropShared(); return;
     }
+    const big = uploadTooBig(got.files);
+    if (big) { body.innerHTML = names + `<div class="err">✖ ${esc(big)}</div>`; await dropShared(); return; }
     let phones = [];
     try { phones = (await api('/api/collectors')).collectors; } catch (_) { /* */ }
     const go = async cid => {

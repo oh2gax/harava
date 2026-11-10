@@ -9,8 +9,9 @@ server {
     listen [::]:80;
     server_name harava.oh2gax.org;
 
-    # Fieldwatch exports can be large; Harava itself accepts up to 512 MB
-    client_max_body_size 512m;
+    # Harava itself accepts uploads up to max_upload_mb of its config.ini (100 MB by default);
+    # keep this a little above it, so that Harava's own message is the one the user sees
+    client_max_body_size 110m;
 
     # keep search engines away (the page needs a sign-in anyway)
     add_header X-Robots-Tag "noindex, nofollow" always;

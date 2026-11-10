@@ -15,6 +15,6 @@
     "file": "Harava_Admin_Guide.pdf",
     "title": "Harava – Admin and server guide",
     "description": "Running Harava on a server next to other sites: installing it step by step on Ubuntu with a systemd service, nginx and a Let's Encrypt certificate without touching the other sites; users, their own data and the View only / Analyze / Admin permissions on the Maintenance page; updating with update.sh, the database conversion and rolling back; the Workbench and its local rules; backups, database snapshots for analysis, moving and removing; security, troubleshooting and a quick reference of the server commands.",
-    "date": "2026-11-09"
+    "date": "2026-11-10"
   }
 ]

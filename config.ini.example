@@ -25,6 +25,10 @@ session_days = 30
 ; ── Imports ──
 ; Keep a compressed copy of every uploaded export in archive/<user>/ so it can be read again (Re-read)
 keep_originals = true
+; The largest upload, in MB (a zip: also each export inside it). An import needs about 15 times the
+; file's size in memory for a moment (a 100 MB export: about 1.4 GB), so on a small server use less,
+; e.g. 25. A day of Fieldwatch log is about 2 MB.
+max_upload_mb = 100
 
 ; ── On a server (harava.oh2gax.org) these lines are: ──
 ; host = 127.0.0.1

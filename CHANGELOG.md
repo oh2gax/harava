@@ -67,6 +67,57 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
   radios as before. On 8–10 Nov: Android / Google 1,505 addresses, Apple device 846, Windows PC 588,
   Samsung 128, Phone / PC 21.
 
+### Security
+Found in a code audit on 10 Nov 2026. All three need a signed-in user with the Analyze permission
+to upload a prepared file (or someone to import a file they were sent); none can be triggered from
+the air or without a sign-in.
+- **Script in a file name or an address.** The pages put the import's file name, a My-devices label
+  and the radio's kind and address into inline `onclick` handlers with `esc()` only; the browser
+  turns `&#39;` back into a quote before it runs a handler, so a file named `a');…('.csv` ran its
+  script when someone pressed *Delete* on that import (confirmed), and the address was written into
+  the Devices table without `esc()` at all. Now: `jsArg()` in `common.js` (JSON string, then
+  `esc()`) for every text in an inline handler, `esc()` on the address and the row key, and
+  `norm_hear()` accepts only WIFI / BLE as the kind and only `AA:BB:CC:DD:EE:FF` as an address
+  (rows with anything else are skipped; the OUI is checked the same way).
+- **Spreadsheet formulas in the CSV exports.** A radio's advertised name is written by whoever owns
+  the radio; a name such as `=HYPERLINK(…)` went into the export as it was. Both exports
+  (`/api/export.csv` and *Export CSV* on the Devices page) now put an apostrophe before text that
+  starts with `=`, `+`, `-`, `@`, tab or CR.
+- **Zip uploads** are refused above 500 exports or 1 GB unpacked (`ZIP_MAX_FILES`,
+  `ZIP_MAX_BYTES`); before, only each member was limited to 512 MB.
+- **Upload limit 100 MB, and a setting.** `MAX_CONTENT_LENGTH` was 512 MB, while an import holds
+  the whole file as rows in memory: measured about 15 times the file's size (18 MB → 0.3 GB,
+  53 MB → 0.8 GB, 95 MB with 473,000 rows → 1.4 GB), enough to exhaust a small server. New setting
+  `max_upload_mb` in `config.ini` (default 100; `MAX_UPLOAD`); it also limits each export inside a
+  zip, which is now reported as an error row instead of being left out silently. Over the limit
+  the server answers 413 with a JSON message, and the pages check the size before sending
+  (`uploadTooBig()` in `common.js`, limit from `FWA.maxUploadMb`), also for files shared to the
+  phone app. `deploy/harava.oh2gax.org.nginx`: `client_max_body_size` 512m → 110m. Fieldwatch's
+  whole rolling log is about 12 MB, so real exports are far below the limit.
+- Every text argument of an inline handler now goes through `jsArg()` or a `data-` attribute, also
+  where the text is a constant or checked by the server (layer names, sort columns, info tabs,
+  and usernames, snapshot names and the temporary password on the Maintenance page), so there is
+  one rule and a test can hold it.
+
+### Tests
+- **`tests/test_harava.py`**, the first automated tests: 55 tests with Python's own `unittest`
+  (`python -m unittest discover -s tests`), about a second, no new dependency. They work on
+  made-up radios in a temporary database and do not touch `harava.db`, `harava_users.db`,
+  `archive/` or the local rules. Covered: the importers (log CSV with and without header, JSON
+  lines, Sit, KML, zip) and what they refuse; both forms of Fieldwatch's `raw` field through
+  `adv_features()`, `mfg_payload()`, `ruuvi_decode()` and the Find My kinds; that every rule of
+  `ids/harava_ids.json` is well formed; that every Fieldwatch signature class has a layer and
+  every layer a colour in `CAT` of `common.js`; storing without duplicates, verdicts, deleting,
+  Bluetooth pauses; the upload limits, the CSV export, the Origin check and the sign-in guard;
+  and that no page script puts quoted text into an inline handler.
+- **`LocalExports`** (skipped when `data/` has no exports, as in git): reads the newest real
+  Fieldwatch exports of `data/` (or of `HARAVA_TEST_EXPORTS`) and cross-checks Fieldwatch's own
+  signatures against what Harava decodes from the same rows: the log's columns are the known
+  ones, every signature name is in the table, `raw` without manufacturer data is a whole
+  advertisement, rows with the Ruuvi signature give a temperature and rows with the Apple AirTags
+  signature carry a Find My message (each in at least 95 % of the rows). With the code of 8 Nov
+  these would have failed on the first log of Fieldwatch 1.1.43.
+
 ### Fixed
 - **Fieldwatch 1.1.43 logs.** From 1.1.43 (9 Nov 2026) the log's `raw` field is the whole
   advertisement also when the row has manufacturer data; before, it was the manufacturer data.
@@ -79,6 +130,8 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
   gives the manufacturer data in either form. On 9–10 Nov this changed the identification of 210
   and 302 addresses.
 - `.conf-pill` no longer wraps inside the radio panel.
+- The main page answered with an error on Windows when `watch_folder` was on another drive than
+  Harava (`os.path.commonpath()` raises `ValueError` there). Found while writing the tests.
 
 ## [2026-11-09]
 

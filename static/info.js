@@ -87,7 +87,7 @@ function infoTitle(tab) {
 async function renderInfo() {
     const TABS = [['whatsnew', "What's new"], ['guides', 'User guides'], ['about', 'About']];
     const tabs = '<div class="info-tabs">' + TABS.map(([k, t]) =>
-        `<button class="info-tab${_infoTab === k ? ' on' : ''}" onclick="switchInfo('${k}')">${t}</button>`).join('') + '</div>';
+        `<button class="info-tab${_infoTab === k ? ' on' : ''}" data-tab="${k}" onclick="switchInfo(this.dataset.tab)">${t}</button>`).join('') + '</div>';
     $('modalBody').innerHTML = tabs + '<div class="wn-ver">Loading&hellip;</div>';
     const tab = _infoTab;
     const body = tab === 'whatsnew' ? whatsNewHtml() : tab === 'guides' ? await guidesHtml() : aboutHtml();

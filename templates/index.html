@@ -290,7 +290,7 @@
         <div class="modal-body" id="modalBody"></div>
     </div>
 </div>
-<script>window.FWA = { open: {{ (user.open or false)|tojson }}, role: {{ user.role|tojson }}, appName: {{ app_name|tojson }}, version: {{ version|tojson }}, travelMin: {{ travel_min_m }}, cartoApiKey: {{ carto_api_key|tojson }} };</script>
+<script>window.FWA = { open: {{ (user.open or false)|tojson }}, role: {{ user.role|tojson }}, appName: {{ app_name|tojson }}, version: {{ version|tojson }}, travelMin: {{ travel_min_m }}, maxUploadMb: {{ max_upload_mb }}, cartoApiKey: {{ carto_api_key|tojson }} };</script>
 <script src="{{ url_for('static', filename='common.js', v=build) }}"></script>
 <script src="{{ url_for('static', filename='app.js', v=build) }}"></script>
 <script src="{{ url_for('static', filename='info.js', v=build) }}"></script>

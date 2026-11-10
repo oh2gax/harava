@@ -31,6 +31,7 @@ It runs on your own computer (open, no sign-in) or on a server behind nginx with
 - [Configuration](#configuration)
 - [What's new, guides and changelog](#whats-new-guides-and-changelog)
 - [Project structure](#project-structure)
+- [Tests](#tests)
 - [REST API](#rest-api)
 - [Privacy](#privacy)
 - [License](#license)
@@ -146,12 +147,14 @@ travel_min_m = 500
 require_login = true
 behind_proxy = true
 session_days = 30
+max_upload_mb = 25
 EOF
 ```
 
 - `host = 127.0.0.1` — only nginx on the same machine can reach Harava.
 - `require_login = true` — Harava refuses to start until an admin exists (step 6), so it is never on the internet without a sign-in.
 - `behind_proxy = true` — Harava trusts nginx's `X-Forwarded-*` headers (real client address in the sign-in log, HTTPS-only cookies).
+- `max_upload_mb = 25` — the largest upload. An import needs about 15 times the file's size in memory for a moment (25 MB: about 400 MB), so choose it by the server's free memory (`free -m`); the default is 100. A day of Fieldwatch log is about 2 MB.
 
 ### 5 — Map key
 
@@ -194,7 +197,7 @@ sudo nginx -t && sudo systemctl reload nginx
 curl -sI http://harava.oh2gax.org/ | head -3     # 302 to /login
 ```
 
-If `nginx -t` reports an error, nothing has been reloaded and the other sites are untouched; remove the link (`sudo rm /etc/nginx/sites-enabled/harava.oh2gax.org`), fix the file and try again. The file handles only `server_name harava.oh2gax.org`, allows uploads up to 512 MB and passes everything to `127.0.0.1:5057`.
+If `nginx -t` reports an error, nothing has been reloaded and the other sites are untouched; remove the link (`sudo rm /etc/nginx/sites-enabled/harava.oh2gax.org`), fix the file and try again. The file handles only `server_name harava.oh2gax.org`, allows uploads up to 110 MB (a little above Harava's own limit, `max_upload_mb`) and passes everything to `127.0.0.1:5057`.
 
 ### 9 — HTTPS with Let's Encrypt
 
@@ -228,7 +231,7 @@ Open `https://harava.oh2gax.org`, sign in with the admin of step 6, add users on
 | Symptom | Cause and fix |
 |---------|---------------|
 | *502 Bad Gateway* | The service is not running: `systemctl status harava`, `journalctl -u harava -n 50`. |
-| *413 Request Entity Too Large* on upload | The file is over 512 MB: raise `client_max_body_size` in the site file (and `MAX_CONTENT_LENGTH` in `harava.py`). |
+| *The upload is too large* (or *413 Request Entity Too Large*) | The files are over the limit, 100 MB at a time by default: upload them in smaller lots. To change the limit, set `max_upload_mb` in `config.ini` and `client_max_body_size` in the nginx site file a little above it, and mind the memory: an import needs about 15 times the file's size for a moment. |
 | *Too many failed sign-ins* | Five wrong passwords from one address lock it for 15 minutes (30 from all addresses lock everyone). Wait, or `sudo systemctl restart harava`. |
 | Forgotten admin password | `cd ~/harava && venv/bin/python harava.py --add-admin` with the same username sets a new password. |
 | The sign-in log shows `127.0.0.1` for everyone | `behind_proxy = true` is missing from `config.ini`. |
@@ -430,6 +433,7 @@ Keep the window short (phones change their address about every 15 minutes), use 
 | `behind_proxy` | `false` | `true` behind nginx with HTTPS: trust `X-Forwarded-*`, HTTPS-only cookies |
 | `session_days` | `30` | how long *Keep me signed in* lasts |
 | `keep_originals` | `true` | keep a compressed copy of every uploaded export in `archive/` (for *Re-read*) |
+| `max_upload_mb` | `100` | the largest upload in MB (a zip: also each export inside it). An import needs about 15 times the file's size in memory for a moment, so use less on a small server, e.g. `25` |
 
 Command line: `python harava.py` (start), `--no-browser` (do not open a browser), `--add-admin` (add an admin or reset a password).
 
@@ -467,6 +471,7 @@ tools/update_bt_numbers.py  downloads the newest Bluetooth SIG lists into ids/
 tools/update_fieldwatch_signatures.py  refreshes signature_classes.json from Fieldwatch's catalog (--check: only tell what changed)
 signature_classes.json    Fieldwatch signature name -> class (from the Fieldwatch repository, MIT)
 doc/                      guides (PDF), whats_new.md, guides.json, src/ (LaTeX + screenshots)
+tests/test_harava.py      automated tests (python -m unittest discover -s tests)
 deploy/harava.service     systemd unit for a server
 deploy/harava.oh2gax.org.nginx  nginx site for a server
 update.sh                 server update script
@@ -477,6 +482,16 @@ CHANGELOG.md              technical history
 ```
 
 Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data), `harava_users.db` (users), `.harava_secret` (cookie key), `ids/local_rules.json` (Workbench rules), `archive/` (kept originals), `snapshots/` (database snapshots), `data/` (your Fieldwatch exports) and `tmp_files/`.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+About fifty tests with Python's own `unittest`, done in a second or two. They use made-up radios in a temporary database, so your `harava.db`, users, `archive/` and local rules are not touched. They cover the importers, both forms of Fieldwatch's `raw` field (before and from 1.1.43), the Find My and Ruuvi decoders, the identification database (every rule well formed), the layers (every Fieldwatch class has a layer, every layer a colour), storing without duplicates, the upload limits, the CSV export and the sign-in guard.
+
+**After a Fieldwatch update**, put a fresh log export into `data/` and run the tests. The `LocalExports` tests read the newest real exports there and compare Fieldwatch's own signatures with what Harava decodes from the same rows (Ruuvi temperatures, Find My messages, the log's columns, signature names). If Fieldwatch has changed its log format, they fail and tell which check — before the change distorts results. Without exports in `data/` these tests are skipped.
 
 ## REST API
 
