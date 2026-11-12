@@ -281,7 +281,8 @@ CLASS_PRIORITY = ["HACKING", "SURVEILLANCE", "LAW_ENFORCEMENT", "DRONE", "GLASSE
 # Ray-Ban glasses and Quest headsets; a name like this tells that it is probably a headset.
 VR_NAME = re.compile(r"\bquest\b|oculus|\bpico\b|vision pro|valve index|\bvive\b", re.I)
 NAME_AIRTAG = re.compile(r"airtag", re.I)
-VEHICLE_NAME = re.compile(r"polestar|tesla|obdlink|mitsubishi|audi_mmi|mbux|bmw|volvo|skoda|"
+# (not "L/A_MitsubishiAdp": that is the adapter of an air conditioner)
+VEHICLE_NAME = re.compile(r"polestar|tesla|obdlink|(?<!L/A_)mitsubishi|audi_mmi|mbux|bmw|volvo|skoda|"
                           r"vw_|toyota|my ?car|carplay", re.I)
 
 # ─────────────────────────── database ───────────────────────────
@@ -1479,7 +1480,13 @@ def identify(kind, name, mfg, raw, uuids):
                 group = f"uuid128:{custom}"
             return {"id": r["id"], "name": r["name"], "layer": r.get("layer", ""),
                     "confidence": r.get("confidence", "low"), "note": r.get("note", ""),
-                    "company": company, "group": group}
+                    "company": r.get("company", company), "group": group}
+    if kind == "BLE" and f["ads"] and not name and all(t in ("01", "0A") for t, _d in f["ads"]):
+        # nothing but the flags (and perhaps the transmit power): there is nothing to identify
+        return {"id": "no-data", "name": "No data in the advertisement", "layer": "", "confidence": "high",
+                "note": "The advertisement carries only the flags field: no name, no company, no service. Nothing in it "
+                        "tells what the device is. Typical of a device that only waits for its owner's phone to connect.",
+                "company": "", "group": ""}
     if company:                                       # no rule: at least say whose radio it is
         return {"id": "company", "name": f"{company} device", "layer": "", "confidence": "low",
                 "note": "Only the company is known (Bluetooth SIG company ID or member UUID).",
@@ -1676,42 +1683,81 @@ def find_stops(points):
 
 
 def phone_stops(hears):
-    """The stops of every phone in these hears: {collector_id: {"stops": [...], "starts": [...]}}.
+    """The stops of every phone in these hears: {collector_id: {"stops", "starts", "track", "times"}}.
     Sit rows carry one position for a whole sitting, so only rows with a time and a place of their
-    own count."""
+    own make the track."""
     tracks = defaultdict(list)
     for h in hears:
         if h["src"] != "sit" and h["ts"] and h["lat"] is not None and h["lon"] is not None:
             tracks[h.get("collector_id")].append((h["ts"], h["lat"], h["lon"]))
     out = {}
     for c, t in tracks.items():
-        sts = find_stops(sorted(t))
-        out[c] = {"stops": sts, "starts": [s["from"] for s in sts]}
+        t.sort()
+        sts = find_stops(t)
+        out[c] = {"stops": sts, "starts": [s["from"] for s in sts], "track": t, "times": [p[0] for p in t]}
     return out
+
+
+def _phone_at(ph, ts, within_ms=60000):
+    """Where the phone was at this moment, from its own track: (lat, lon), or None when the track
+    has no point within a minute."""
+    i = bisect.bisect_left(ph["times"], ts)
+    best = None
+    for k in (i - 1, i):
+        if 0 <= k < len(ph["times"]) and (best is None or abs(ph["times"][k] - ts) < abs(ph["times"][best] - ts)):
+            best = k
+    if best is None or abs(ph["times"][best] - ts) > within_ms:
+        return None
+    return ph["track"][best][1], ph["track"][best][2]
+
+
+COMPANION_RSSI = -55         # a companion: travelled with the phone and came this close (on you, in your bag or car)
+COMPANION_ROAD_MIN = 10      # ... and, when it was never at two stops, stayed beside you this many minutes
+BESIDE_RSSI = -80            # "beside you": a Bluetooth radio this strong ...
+BESIDE_MIN_M = 250           # ... at places of your way at least this far apart ...
+BESIDE_MIN_S = 300           # ... and this long apart. No fixed Bluetooth radio reaches that far that strongly.
 
 
 def travel_of(hs, stops):
     """How these hears (one device: one address, or all the addresses of a linked device) travelled
     with the phone. Returns None, or {level, stops, at, km, min}:
-    level "stops" = heard at two stops at least travel_min_m apart; "road" = heard for ROAD_MIN_S
-    while the phone moved ROAD_FACTOR x travel_min_m, or at a stop and again that far from it."""
+    level "stops" = heard at two stops at least travel_min_m apart;
+    level "road"  = heard for ROAD_MIN_S while the phone moved ROAD_FACTOR x travel_min_m, or at a stop
+                    and again that far from it, or (Bluetooth) strongly at two points of the way
+                    BESIDE_MIN_M and BESIDE_MIN_S apart: someone walking beside you.
+    A log row is one sighting, where the phone was at that moment. A Sit row tells when the radio was
+    first and last heard: two sightings, placed on the phone's own track."""
     far = CFG["travel_min_m"]
-    at, moving = {}, defaultdict(list)            # place -> stop; (phone, run number) -> hears on the move
+    at, moving, strong = {}, defaultdict(list), []   # place -> sightings; stretch of road -> sightings
+    empty = {"stops": [], "starts": [], "track": [], "times": []}
     for h in hs:
-        if h["src"] == "sit" or not h["ts"]:
+        if not h["ts"]:
             continue
-        ph = stops.get(h.get("collector_id")) or {"stops": [], "starts": []}
-        sts = ph["stops"]
-        k = bisect.bisect_right(ph["starts"], h["ts"]) - 1
-        if k >= 0 and h["ts"] <= sts[k]["to"]:
-            # (a stop is a stretch of time, so a row without a GPS fix still tells at which stop it was heard)
-            at.setdefault((h.get("collector_id"), sts[k]["place"]), []).append((sts[k], h))
-        elif h["lat"] is not None and h["lon"] is not None:
-            moving[(h.get("collector_id"), k)].append(h)   # k = the stop before this stretch of road
+        ph = stops.get(h.get("collector_id")) or empty
+        if h["src"] == "sit":
+            seen = [(t, None, None) for t in {h["ts"], h.get("last_ts") or h["ts"]}]
+        else:
+            seen = [(h["ts"], h["lat"], h["lon"])]
+        for ts, lat, lon in seen:
+            k = bisect.bisect_right(ph["starts"], ts) - 1
+            if k >= 0 and ts <= ph["stops"][k]["to"]:
+                # (a stop is a stretch of time, so a row without a GPS fix still tells at which stop it was heard)
+                st = ph["stops"][k]
+                at.setdefault((h.get("collector_id"), st["place"]), []).append((st, ts))
+                lat, lon = (lat, lon) if lat is not None and lon is not None else (st["lat"], st["lon"])
+            else:
+                if lat is None or lon is None:
+                    pos = _phone_at(ph, ts)
+                    if not pos:
+                        continue
+                    lat, lon = pos
+                moving[(h.get("collector_id"), k)].append((ts, lat, lon))   # k = the stop before this stretch
+            if h["kind"] == "BLE" and h["src"] != "sit" and (h["rssi"] or -999) >= BESIDE_RSSI:
+                strong.append((ts, lat, lon))
     if not at and not moving:
         return None
     visits = []                                   # when: the stops where it was heard, one entry per stay
-    for fr, to, pl in sorted({(st["from"], st["to"], st["place"]) for v in at.values() for st, _h in v}):
+    for fr, to, pl in sorted({(st["from"], st["to"], st["place"]) for v in at.values() for st, _t in v}):
         if visits and visits[-1][2] == pl and fr - visits[-1][1] <= 600000:
             visits[-1][1] = to
         else:
@@ -1719,25 +1765,30 @@ def travel_of(hs, stops):
     cents = [(v[0][0]["lat"], v[0][0]["lon"]) for v in at.values()]
     apart = max((haversine_m(a[0], a[1], b[0], b[1]) for i, a in enumerate(cents) for b in cents[i + 1:]), default=0)
     if len(cents) >= 2 and apart >= far:
-        first = min(h["ts"] for v in at.values() for _s, h in v)
-        last = max(h["ts"] for v in at.values() for _s, h in v)
+        first = min(t for v in at.values() for _s, t in v)
+        last = max(t for v in at.values() for _s, t in v)
         return {"level": "stops", "stops": len(cents), "at": visits[:8], "km": round(apart / 1000, 1),
                 "min": round((last - first) / 60000)}
+
+    def box(pts):
+        return haversine_m(min(p[1] for p in pts), min(p[2] for p in pts), max(p[1] for p in pts), max(p[2] for p in pts))
+
     best = None
     for run in moving.values():
-        lats, lons, ts = [h["lat"] for h in run], [h["lon"] for h in run], [h["ts"] for h in run]
-        spread = haversine_m(min(lats), min(lons), max(lats), max(lons))
-        dur = (max(ts) - min(ts)) / 1000
+        spread, dur = box(run), (max(p[0] for p in run) - min(p[0] for p in run)) / 1000
         if spread >= ROAD_FACTOR * far and dur >= ROAD_MIN_S and (best is None or spread > best[0]):
             best = (spread, dur)
     if best is None and cents:                    # at a stop, and heard again far from it on the way
-        away = [(min(haversine_m(c[0], c[1], h["lat"], h["lon"]) for c in cents), h["ts"])
-                for run in moving.values() for h in run]
+        away = [(min(haversine_m(c[0], c[1], p[1], p[2]) for c in cents), p[0]) for run in moving.values() for p in run]
         away = [(d, t) for d, t in away if d >= ROAD_FACTOR * far]
         # (twice, half a minute apart: one row with a wrong GPS fix must not send a neighbour travelling)
         if len(away) >= 2 and max(t for _d, t in away) - min(t for _d, t in away) >= 30000:
-            ts = [t for _d, t in away] + [h["ts"] for v in at.values() for _s, h in v]
+            ts = [t for _d, t in away] + [t for v in at.values() for _s, t in v]
             best = (max(d for d, _t in away), (max(ts) - min(ts)) / 1000)
+    if best is None and len(strong) >= 4:         # beside you on a short way, on foot
+        spread, dur = box(strong), (max(p[0] for p in strong) - min(p[0] for p in strong)) / 1000
+        if spread >= BESIDE_MIN_M and dur >= BESIDE_MIN_S:
+            best = (spread, dur)
     if best:
         return {"level": "road", "stops": len(cents), "at": visits[:8], "km": round(best[0] / 1000, 1),
                 "min": round(best[1] / 60)}
@@ -1878,7 +1929,12 @@ def build_devices(hears, stops=None):
             if loc:
                 gspread = round(haversine_m(min(p[0] for p in loc), min(p[1] for p in loc),
                                             max(p[0] for p in loc), max(p[1] for p in loc)))
+        # a companion travelled with the phone and was very close: your own watch, earbuds or second phone,
+        # the phone of the person next to you, or something put in your bag. My devices can claim it.
+        close = max((d["rssi_max"] if d["rssi_max"] is not None else -999) for d in ds) >= COMPANION_RSSI
+        comp = bool(tv) and close and (tv["level"] == "stops" or tv.get("min", 0) >= COMPANION_ROAD_MIN)
         for d in ds:
+            d["companion"] = comp
             d.update({"travel": tv.get("level", ""), "travelled": bool(tv), "travel_stops": tv.get("stops", 0),
                       "travel_km": tv.get("km", 0), "travel_min": tv.get("min", 0), "travel_at": tv.get("at", []),
                       "group_spread_m": gspread or d["spread_m"]})
@@ -2696,7 +2752,7 @@ def api_export():
         devs = [d for d in devs if f"{d['kind']}|{d['mac']}" in macs]
     cols = ["kind", "mac", "name", "vendor", "category", "class", "fleets", "hears", "log_rows", "sit_hits", "first", "last",
             "rssi_max", "rssi_med", "channel", "freq", "band", "flags", "spread_m", "places", "travelled",
-            "travel", "travel_stops", "travel_km", "travel_min", "group", "group_size",
+            "travel", "travel_stops", "travel_km", "travel_min", "companion", "group", "group_size",
             "tracker_mode", "lat", "lon", "mfg", "uuids", "raw"]
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -3244,6 +3300,8 @@ def _fingerprint(d):
 def _wb_tab(d, data):
     if d["kind"] != "BLE":
         return None
+    if d["ident_id"] == "no-data":           # only flags or the power: nothing a rule could read
+        return "nodata" if d["category"] == "Unidentified" else None
     if d["ident_id"] in ("company", "custom-uuid") or (d["ident_id"] and d["ident_conf"] == "low"):
         return "weak"
     if d["category"] != "Unidentified" or d["ident_id"]:
@@ -3666,7 +3724,7 @@ def workbench():
 
 # ─────────────── my devices ───────────────
 
-OWN_MATCHES = ("mac", "mac_prefix", "name", "name_contains")
+OWN_MATCHES = ("mac", "mac_prefix", "name", "name_contains", "companion")
 
 
 @app.route("/api/own")
@@ -3690,6 +3748,10 @@ def api_own_add():
         return jsonify({"error": "choose how to match and give a value"}), 400
     if kind not in ("", "WIFI", "BLE"):
         return jsonify({"error": "radio must be Any, WIFI or BLE"}), 400
+    if match == "companion":                      # whatever travels with me this close, on one layer or on any
+        value = next((x for x in LAYERS + ["any"] if x.lower() == value.lower()), "")
+        if not value:
+            return jsonify({"error": "for Always with me, the value is a layer name (e.g. Android / Google) or any"}), 400
     if match.startswith("mac"):
         value = value.upper().replace("-", ":")
         if not re.fullmatch(r"[0-9A-F]{2}(:[0-9A-F]{2}){0,5}:?", value):

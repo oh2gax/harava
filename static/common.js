@@ -123,11 +123,15 @@ const BT_GAP_PLUGIN = {
     },
 };
 
-// My devices: a rule matches a radio by address, address start, name or part of the name
-const OWN_MATCH_TXT = { mac: 'Address is', mac_prefix: 'Address starts with', name: 'Name is', name_contains: 'Name contains' };
+// My devices: a rule matches a radio by address, address start, name or part of the name. A watch or a phone
+// has none of these for long (its address and its advertisement change, and it sends no name), so there is one
+// more kind: "always with me" claims every device of a layer that travelled with the phone and came very close
+// (d.companion, decided by the server).
+const OWN_MATCH_TXT = { mac: 'Address is', mac_prefix: 'Address starts with', name: 'Name is', name_contains: 'Name contains', companion: 'Always with me, on layer' };
 function ownRuleHits(r, d) {
     if (r.kind && r.kind !== d.kind) return false;
     const v = r.value.toLowerCase(), name = (d.name || d.group_name || '').toLowerCase(), mac = (d.mac || '').toLowerCase();
+    if (r.match === 'companion') return !!d.companion && (v === 'any' || (d.category || '').toLowerCase() === v);
     return (r.match === 'mac' && mac === v) || (r.match === 'mac_prefix' && mac.startsWith(v)) ||
         (r.match === 'name' && !!name && name === v) || (r.match === 'name_contains' && name.includes(v));
 }
@@ -160,7 +164,7 @@ function groupSame(list) {
 // A radio's own page is built from that address alone. What is judged across all radios (which addresses
 // are one device, and how that device travelled along the phone's whole track) comes from the list.
 function carryAcross(d, base) {
-    for (const k of ['group', 'group_size', 'group_name', 'group_spread_m', 'travel', 'travelled', 'travel_stops', 'travel_km', 'travel_min', 'travel_at']) d[k] = base[k];
+    for (const k of ['group', 'group_size', 'group_name', 'group_spread_m', 'travel', 'travelled', 'travel_stops', 'travel_km', 'travel_min', 'travel_at', 'companion']) d[k] = base[k];
 }
 
 // ── Travelled with the phone ──
@@ -174,9 +178,13 @@ function travelTag(d, cls) {
 }
 function travelText(d) {
     if (d.travel === 'stops') return `With you at ${d.travel_stops} stops, ${d.travel_km} km apart`;
-    if (d.travel === 'road') return `Same road for ${d.travel_min} min, ${d.travel_km} km` + (d.travel_stops ? ', from a stop' : '');
+    if (d.travel === 'road') return (d.travel_km < 1 ? `Beside you for ${d.travel_min} min while you moved ${Math.round(d.travel_km * 1000)} m` : `Same road for ${d.travel_min} min, ${d.travel_km} km`) + (d.travel_stops === 1 ? ', from a stop' : '');
     return '';
 }
+// very close and travelling with you: yours, your passenger's, or something left in your bag
+// "Always with me" is offered only where nothing else can hold the device: Bluetooth, no name.
+function companionOffer(d) { return !!d.companion && !d.name && d.kind === 'BLE'; }
+const COMPANION_HINT = 'Very close to you all the way. If it is your own watch, earbuds or phone, ＋ My device marks everything that travels with you like this as yours.';
 function travelWhen(d) {            // the stops where it was heard: "11:21–13:46, 14:25–14:59"
     const hm = ms => { const t = new Date(ms); return pad(t.getHours()) + ':' + pad(t.getMinutes()); };
     const day = ms => { const t = new Date(ms); return t.getDate() + '.' + (t.getMonth() + 1) + '. '; };

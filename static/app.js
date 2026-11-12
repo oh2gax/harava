@@ -181,17 +181,20 @@ function renderOwn() {
 function prefillOwn(kind, mac) {
     const d = S.devices.find(x => x.kind === kind && x.mac === mac) || { kind, mac, name: '', vendor: '', flags: '' };
     const byName = d.name && (d.kind === 'BLE' || (d.flags || '').includes('RAND'));
+    // no name and an address that changes, but always with me and very close: only "always with me" can hold it
+    const comp = companionOffer(d);
     $('ownKind').value = d.kind;
-    $('ownMatch').value = byName ? 'name' : 'mac';
-    $('ownValue').value = byName ? d.name : d.mac;
-    $('ownLabel').value = d.name || d.vendor || '';
+    $('ownMatch').value = comp ? 'companion' : byName ? 'name' : 'mac';
+    $('ownValue').value = comp ? d.category : byName ? d.name : d.mac;
+    $('ownLabel').value = comp ? 'My watch or phone' : d.name || d.vendor || '';
     showView('devices');
     $('ownBox').open = true;
     document.querySelector('#view-devices .page').scrollTop = 0;
     $('ownLabel').focus(); $('ownLabel').select();
     $('ownValue').dataset.real = $('ownValue').value; $('ownLabel').dataset.real = $('ownLabel').value;
     if (window.haravaMask && window.haravaMask.on) window.haravaMask.refresh();      // masked on screen only
-    toast(byName ? 'Matching by name: this Bluetooth device may change its address' : 'Check the label and press Add');
+    toast(comp ? 'Matching everything on this layer that travels with you this close. Check the label and press Add'
+        : byName ? 'Matching by name: this Bluetooth device may change its address' : 'Check the label and press Add');
 }
 // the form value as typed, or the real value behind a masked one (Mask addresses on)
 function ownInput(id) { const el = $(id); return el.dataset.real && el.dataset.shown && el.value === el.dataset.shown ? el.dataset.real : el.value; }
@@ -513,7 +516,7 @@ async function selectDevice(kind, mac, fly) {
             ${d.kind === 'WIFI' ? `<span>Channel</span><b>${esc(d.channel)} · ${d.freq} MHz</b>` : ''}
             <span>Flags</span><b>${esc(d.flags || '–')}</b>
             <span>Places</span><b>${d.places} · spread ${fmtM(d.spread_m)}</b>
-            ${d.travel ? `<span>Travelled</span><b${d.travel === 'stops' ? ' class="amb"' : ''}>${esc(travelText(d))}${travelWhen(d) ? `<div style="color:var(--text-secondary);font-weight:400">at your stops ${esc(travelWhen(d))}</div>` : ''}</b>` : ''}
+            ${d.travel ? `<span>Travelled</span><b${d.travel === 'stops' ? ' class="amb"' : ''}>${esc(travelText(d))}${travelWhen(d) ? `<div style="color:var(--text-secondary);font-weight:400">at your stops ${esc(travelWhen(d))}</div>` : ''}${companionOffer(d) && !ownMatch(d) ? `<div style="color:var(--text-secondary);font-weight:400">${COMPANION_HINT}</div>` : ''}</b>` : ''}
             ${d.mfg ? `<span>Company ID</span><b class="mono">0x${esc(d.mfg)}</b>` : ''}
             ${d.uuids ? `<span>Services</span><b class="mono">${esc(d.uuids.replace(/0000(\w{4})-0000-1000-8000-00805F9B34FB/gi, '$1'))}</b>` : ''}
             ${d.vendor_ie ? `<span>Vendor IEs</span><b class="mono">${esc(d.vendor_ie)}</b>` : ''}

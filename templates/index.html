@@ -117,7 +117,7 @@
     <div class="view active" id="view-map">
         <div id="map"></div>
         <div class="panel" id="timelinePanel">
-            <div class="panel-title">Hears per <span id="tlBin">10 min</span> · Wi-Fi / Bluetooth · new devices
+            <div class="panel-title"><span>Hears per <span id="tlBin">10 min</span> · Wi-Fi / Bluetooth · new devices</span>
                 <select id="tlCat" class="tl-cat" onchange="setTlCat(this.value)" title="Show only one kind of device in the graph"></select>
                 <span id="tlNote" class="tl-note"></span>
                 <span class="r" id="tlRange"></span></div>
@@ -148,6 +148,7 @@
                         <option value="mac_prefix">Address starts with</option>
                         <option value="name">Name is</option>
                         <option value="name_contains">Name contains</option>
+                        <option value="companion" title="Everything on one layer that travelled with you and came very close: a watch or phone that changes its address and sends no name. The value is the layer, or any.">Always with me, on layer</option>
                     </select>
                     <input type="text" id="ownValue" placeholder="AA:BB:CC:DD:EE:FF or a name">
                     <input type="text" id="ownLabel" placeholder="Label, e.g. Home router">

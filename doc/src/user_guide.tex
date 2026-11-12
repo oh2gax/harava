@@ -42,7 +42,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava --- what your phone heard, raked together}
-\fancyhead[R]{\small\itshape User guide, version 1.6 --- November 2026}
+\fancyhead[R]{\small\itshape User guide, version 1.7 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -63,7 +63,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad User guide, version 1.6 \quad$\cdot$\quad 12 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad User guide, version 1.7 \quad$\cdot$\quad 12 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava}\par\vspace{5pt}
 {\large\bfseries How to collect with Fieldwatch and read what your phone heard:\\ import, map, devices, layers and the classroom phone check}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -308,7 +308,7 @@ The bars count the hears in each 10-minute step (each hour or day when you look 
 \begin{figure}[H]\centering
 \begin{minipage}[c]{0.63\textwidth}\centering\includegraphics[width=\textwidth]{guide_img/g_selected.jpg}\end{minipage}\hfill
 \begin{minipage}[c]{0.34\textwidth}\centering\includegraphics[width=\textwidth]{guide_img/g_detail.jpg}\end{minipage}
-\caption{The D-Link 4G router selected (left), and its panel enlarged (right). Its hear-points are joined by the amber dashed line: the same address was heard at home and at stops 3.7\,km away, so it \emph{travelled} with the phone. The chart shows its signal over the day: about $-70$\dBm at home and $-29$\dBm at the first stop.}
+\caption{The D-Link 4G router selected (left), and its panel enlarged (right). Its hear-points are joined by the amber dashed line: the same address was heard at home and at stops 3.6\,km away, so the amber pill says \emph{at 3 stops with you} and the row \emph{Travelled} lists those stops by their times (the router rode in the car that day). The chart shows its signal over the day: about $-70$\dBm at home and $-29$\dBm at the first stop.}
 \end{figure}
 
 Clicking a pin (or a row of the Devices page) opens the \textbf{Selected radio} panel at the top right and draws every place where the radio was heard. Close it with \ui{$\times$}; click any pin to open it again.
@@ -327,6 +327,7 @@ Hears & how many times it was written down; with a Sit, also the log rows and th
 First / last & the first and last time heard (in the chosen range)\\
 RSSI max / med & the strongest and the typical signal; \emph{Sit RSSI} gives the sit's weakest \dots\ strongest\\
 Places, spread & in how many places (about 200\,m apart) and over what distance it was heard\\
+Travelled & only for a radio that travelled: at how many of your stops and how far apart, with the times of those stops; or for how long it was beside you while you moved (Section~\ref{sec:reading})\\
 Identified as & what Harava's own database says the radio is, with a confidence pill (Section~\ref{sec:ids})\\
 Company & the company from the official Bluetooth SIG list\\
 Same device & how many addresses the same device used, when Harava can tell\\
@@ -337,7 +338,7 @@ Days seen & every day in your imports on which this address appears\\
 \caption{The fields of the Selected radio panel.}
 \end{table}
 
-Under the chart, \ui{+ Mark as my device} adds the radio to My devices (Section~\ref{sec:mine}). A note tells when the address is random, when the name points to a VR headset, and when only the Sit heard the radio.
+Under the chart, \ui{+ Mark as my device} adds the radio to My devices (Section~\ref{sec:mine}). For a Bluetooth device without a name that was very close to you all the way, the \emph{Travelled} row says so, and the button then offers the rule \emph{Always with me} instead of an address. A note tells when the address is random, when the name points to a VR headset, and when only the Sit heard the radio.
 
 % ─────────────────────────────────────────────────────────────────────
 \section{Device layers}\label{sec:layers}
@@ -445,7 +446,7 @@ Fieldwatch's signatures name only part of what it hears. On 8 November it left 1
 \item \texttt{bt\_assigned\_numbers.json} --- the official Bluetooth SIG lists: 4,065 company numbers and 819 service numbers. \texttt{python tools/update\_bt\_numbers.py} downloads the newest lists.
 \item \texttt{harava\_ids.json} --- Harava's own rules, for example \emph{Bluetooth Mesh device, not set up}, \emph{AirPods}, \emph{iPhone / iPad / Mac}, \emph{Samsung Galaxy phone}, \emph{Windows PC}, \emph{Oral-B toothbrush}. The first rule that matches wins.
 \end{itemize}
-A radio that Fieldwatch left \emph{Unidentified} moves to the layer the rule gives, e.g.\ \emph{Home \& IoT} for a mesh light. \emph{Identified as} and \emph{Company / vendor} show the result on the Devices page and in the Selected radio panel. A grey name with \textbf{?} is a weak guess: ``some Apple device'' says only who made it.
+A radio that Fieldwatch left \emph{Unidentified} moves to the layer the rule gives, e.g.\ \emph{Home \& IoT} for a mesh light. \emph{Identified as} and \emph{Company / vendor} show the result on the Devices page and in the Selected radio panel. A grey name with \textbf{?} is a weak guess: ``some Apple device'' says only who made it. Two results name what was sent and not the device. \emph{iBeacon (beacon of any maker)}: the iBeacon format starts with Apple's company number whoever made the beacon --- shop beacons, door readers and some cars send it --- so Harava no longer calls such a radio an Apple device. \emph{No data in the advertisement}: the radio sent only its flags or its transmit power, so there is nothing to read; it stays \emph{Unidentified}, and the Workbench keeps it on its \ui{No data} tab.
 
 \lead{One device, many addresses.} Phones, PCs and many smart-home devices change their Bluetooth address every few minutes. Sometimes the data still proves that addresses belong together: a Bluetooth Mesh device sends its own device number in every advert. Harava then puts them in one group. An Android phone or watch gives itself away in another way: it changes its address about every nine minutes, but the Google advertisement it sends stays the same over several changes, and one form of it carries four characters that stay for about a day. Harava joins the addresses that send the same advertisement, or the same four characters; in the panel the group reads \emph{same Google advertisement} or \emph{Google day code}. (Google does not document these advertisements. The day code is what four days of data showed: 270 codes, and never two different advertisements with one code at the same moment.) A service number that a maker uses in all its products is not enough on its own (Ruuvi tags, Windows PCs and Galaxy Buds each share one), so such addresses are joined only when they also tell the same name --- and only when the addresses are of the kind that changes. Twenty rental scooters that all call themselves ``Scooter1'' have twenty fixed addresses, and stay twenty scooters. With \ui{Group same device} on (in Filter), a group is one row with an \textbf{N addr.} tag; its pin is the loudest address, and the hears are added up.
 
@@ -466,6 +467,10 @@ Your own router, PC, phone, earbuds, sensors and car are heard all the time and 
 \lead{Adding.} Press \ui{+} on a Devices row or \ui{+ Mark as my device} in the Selected radio panel: the form at the top of the Devices page is filled in. Check the label and press \ui{Add}. You can also type a rule yourself.
 
 \lead{Matching.} \emph{Address is} (one exact address), \emph{Address starts with} (e.g.\ a router's 2.4 and 5\,GHz networks, whose addresses differ only at the end), \emph{Name is}, \emph{Name contains}; optionally only Wi-Fi or only Bluetooth. Bluetooth phones, PCs and earbuds change their address, so match them \textbf{by name}; \ui{+} chooses that for them by itself. The column \emph{Matches now} counts the radios a rule catches in the chosen range. Rules apply to every day, also to files imported later.
+
+\lead{Always with me.} A watch or a phone without a name cannot be matched by name, and its address changes every few minutes. The fifth kind of rule, \emph{Always with me, on layer}, catches such a device by how it behaves: it travelled with you (Section~\ref{sec:reading}), it was heard very close ($-55$\dBm\ or stronger), and it was at two of your stops or beside you for at least ten minutes. The value is a device layer, e.g.\ \emph{Android / Google} or \emph{Wearable}, or \texttt{any}. \ui{+} chooses this kind by itself for a Bluetooth device that has no name and behaved like this.
+
+\warnbox{What this rule cannot tell.}{It does not know whose the device is. A passenger's phone on the same layer, or a device somebody left in your bag, behaves in the same way and is hidden as yours too. Use it when you know what travels with you, and switch \ui{Hide my devices} off when you want to see everything that did. A device that changes its address is often several rows (Android sends several streams at once that Harava cannot always join); the rule marks each of them.}
 
 % ─────────────────────────────────────────────────────────────────────
 \section{The Phone check}\label{sec:phone}
@@ -511,7 +516,13 @@ The data, the CSV export and the database are not changed, and \ui{Add} in My de
 \end{itemize}
 A radio you only passed gets no tag, however far apart the two sightings were: at 100\,km/h half a kilometre takes 18 seconds. The addresses of one device are judged together, so a phone or a watch that changed its address five times on the way is one device that travelled, not five that did not.
 
-On 8 November two radios were \emph{at stops}: a D-Link 4G router (about $-70$\dBm\ at home, $-29$\dBm\ at the first stop 3.7\,km away; it rode in the car that day) and a device named EF-R3PB2139 (the name fits an EcoFlow River 3 Plus power station). On a 23\,km drive on 11 November the old rule (any address heard 500\,m apart) marked 57 addresses; the levels show one device at three stops --- almost certainly the driver's own watch, under 38 addresses --- and a dozen devices on the same road for two to fourteen minutes: other cars.
+\lead{The Sit counts too.} A Sit export tells only when a radio was first and last heard, not where. Harava places both moments on your phone's own track from the log of the same time, so a device the Sit heard at the start and at the end of a drive is judged like the others. The log holds only about a tenth of what the Sit hears, so this finds more.
+
+\lead{A short walk.} A walk of a few hundred metres has no two stops 500\,m apart and no kilometre of road. A Bluetooth device that was heard at $-80$\dBm\ or stronger at least four times, over at least five minutes and 250\,m of your way, is therefore also tagged \emph{same road}; its panel says \emph{Beside you for 17 min while you moved 300\,m}.
+
+\lead{Always with you.} A device that travelled and was also very close ($-55$\dBm\ or stronger), at two stops or for at least ten minutes, is most likely on you or in your car: a watch, earbuds, a power bank, a passenger's phone. Its panel says so, and My devices can hide all such devices of one layer with one rule (\emph{Always with me}, Section~\ref{sec:mine}).
+
+On 8 November two radios were \emph{at stops}: a D-Link 4G router (about $-70$\dBm\ at home, $-29$\dBm\ at the first stop 3.6\,km away; it rode in the car that day) and a device named EF-R3PB2139 (the name fits an EcoFlow River 3 Plus power station). On a 23\,km drive on 11 November the old rule (any address heard 500\,m apart) marked 57 addresses. The levels show three rows at two or three stops and four more beside the phone for 11 to 32 minutes, all of them nameless Android streams heard very close, 50 addresses together: the watch or phone that rode in the car, which one \emph{Always with me} rule now hides. The other 23 devices were on the same road for two to nineteen minutes: other traffic. On a 300\,m evening walk on 10 November a named smartwatch of the family was beside the phone for 17 minutes.
 
 \lead{Trackers.} An AirTag or other tag \emph{near its owner} is normal: every Apple user carries some. A tag \emph{separated} from its owner and heard in several places along your way, over a long time, deserves a closer look. Fieldwatch and Harava read the mode from the raw data: for Apple Find My a full-key frame means separated; for Google Find Hub and DULT a flag byte tells it. Signals from one tag change address too, so look at the pattern, not at one address.
 

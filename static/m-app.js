@@ -22,7 +22,7 @@
  * The theme is the full page's setting (fwa_theme_mode), What's new its seen version (harava_seen_version).
  */
 /* global L, Chart, CAT, CAT_COLORS, CAT_ICON, CAT_ORDER, esc, pad, fmtTime, fmtM, ownRuleHits, groupSame,
-          phoneType, phoneBoxLimit, phoneZones, OWN_MATCH_TXT, travelTag, travelText, travelWhen, carryAcross */
+          phoneType, phoneBoxLimit, phoneZones, OWN_MATCH_TXT, travelTag, travelText, travelWhen, carryAcross, COMPANION_HINT, companionOffer */
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -590,7 +590,7 @@
         <span>RSSI max / med</span><b>${d.rssi_max ?? '?'} / ${d.rssi_med ?? '?'} dBm</b>
         ${d.kind === 'WIFI' ? `<span>Channel</span><b>${esc(d.channel)} · ${d.freq} MHz</b>` : ''}
         <span>Places</span><b>${d.places} · spread ${fmtM(d.spread_m)}</b>
-        ${d.travel ? `<span>Travelled</span><b>${esc(travelText(d))}${travelWhen(d) ? `<br><small>at your stops ${esc(travelWhen(d))}</small>` : ''}</b>` : ''}
+        ${d.travel ? `<span>Travelled</span><b>${esc(travelText(d))}${travelWhen(d) ? `<br><small>at your stops ${esc(travelWhen(d))}</small>` : ''}${companionOffer(d) && !S.own.some(x => ownRuleHits(x, d)) ? `<br><small>${COMPANION_HINT}</small>` : ''}</b>` : ''}
         ${d.mfg ? `<span>Company ID</span><b class="mono">0x${esc(d.mfg)}</b>` : ''}
         ${d.uuids ? `<span>Services</span><b class="mono">${esc(d.uuids.replace(/0000(\w{4})-0000-1000-8000-00805F9B34FB/gi, '$1'))}</b>` : ''}
         ${d.raw ? `<span>Raw</span><b class="mono">${esc(d.raw)}</b>` : ''}
@@ -639,10 +639,15 @@
   }
   async function addMine(d) {
     const byName = d.name && (d.kind === 'BLE' || (d.flags || '').includes('RAND'));
-    const label = prompt(`Mark as my device (${byName ? 'name is "' + d.name + '"' : 'address ' + d.mac}).\nLabel:`, d.name || d.vendor || '');
+    // no name and an address that changes, but always with me and very close: only "always with me" can hold it
+    const comp = companionOffer(d);
+    const how = comp ? `everything on the layer ${d.category} that travels with you this close; that also takes a passenger's phone, or one left in your bag`
+      : byName ? 'name is "' + d.name + '"' : 'address ' + d.mac;
+    const label = prompt(`Mark as my device (${how}).\nLabel:`, comp ? 'My watch or phone' : d.name || d.vendor || '');
     if (label === null) return;
     try {
-      await post('/api/own', { kind: d.kind, match: byName ? 'name' : 'mac', value: byName ? d.name : d.mac, label: label.trim() || d.mac });
+      await post('/api/own', comp ? { kind: 'BLE', match: 'companion', value: d.category, label: label.trim() || 'My watch or phone' }
+        : { kind: d.kind, match: byName ? 'name' : 'mac', value: byName ? d.name : d.mac, label: label.trim() || d.mac });
       toast('Added to My devices'); await loadData(true); drawDevice();
     } catch (e) { toast('Not added: ' + e.message); }
   }

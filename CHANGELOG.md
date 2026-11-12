@@ -40,6 +40,35 @@ From the data check of an 11 Nov drive (23 km): "travelled with you" marked 57 a
   the list); group labels for the new keys. CSV exports: `travel`, `travel_stops`, `travel_km`,
   `travel_min` (and `group`, `group_size` in the server's export).
 - Tests: 11 more (`Linking`, `Travel`, the form of every rule's `group`), 66 in all.
+- **Sit rows in the travel check.** A Sit row has a first and a last time and no place of its own.
+  `travel_of()` now takes both as sightings and places them: at the stop the time falls in, or on
+  the phone's track (`_phone_at()`, the nearest position within 60 s; `phone_stops()` returns the
+  track with the stops). All four days: `road` 13 → 30 devices, `stops` 5 as before.
+- **Beside you on a short walk.** A third way to `road`: at least four Bluetooth log sightings at
+  `BESIDE_RSSI` (−80 dBm) or stronger that span `BESIDE_MIN_S` (300 s) and `BESIDE_MIN_M` (250 m).
+  The pages then say *Beside you for N min while you moved X m* (`travel_km` under 1).
+- **Companions.** Device field `companion`: it travelled, its strongest hear is `COMPANION_RSSI`
+  (−55 dBm) or more, and it was at two stops or beside the phone for `COMPANION_ROAD_MIN` (10)
+  minutes; decided per linked device. New kind of My-devices rule `companion` (*Always with me,
+  on layer*): the value is a layer of `LAYERS` or `any`, and it matches every companion on that
+  layer. `＋` offers it for a Bluetooth device without a name (`companionOffer()`); the panels
+  show a hint there. The rule cannot tell whose the device is: a passenger's phone on the same
+  layer matches too (said in the hint, the guides and What's new). CSV export: `companion`.
+  Not built: joining a device's parallel address streams by simultaneous address changes. Only
+  2 of about 31 changes were seen cleanly in the log, and resumed scans make false coincidences.
+- **Identification database `2026-11-12.2`, 76 rules** (26 new): by name `name-ensto-thermostat`,
+  `name-ensto-ev`, `name-evse`, `name-obd`, `name-teltonika`, `name-tachograph`, `name-scooter`,
+  `name-polestar`, `name-volvo`, `name-s3xy`, `name-driversnote`, `name-nut`, `name-sumup`,
+  `name-brother-printer`, `name-epson-printer`, `name-resmed`, `name-wilo`, `name-mitsubishi-ac`,
+  `name-gree-ac`, `name-bed`, `name-ipstube`; by data `ibeacon`, `ensto-ev-charger`,
+  `ensto-thermostat-data`, `casambi`, `serial-module`. `name-audio` and `name-wearable` know more
+  names. A rule may carry `company`, shown in place of the SIG company (`ibeacon`). All four
+  days: Unidentified Bluetooth radios 285 → 190.
+- **`no-data`**, a built-in identification for a Bluetooth advertisement that holds only flags
+  and/or the Tx power and no name: *No data in the advertisement*, no layer (the radio stays
+  Unidentified; the Workbench keeps it on the *No data* tab).
+- Tests: 7 more (rules of the road, iBeacon, empty advertisement, Sit times on the track, short
+  walk, companion, the companion rule), 73 in all.
 
 ### Fixed
 - **Different devices were joined by name.** Addresses sharing a custom service UUID and a name
@@ -48,10 +77,18 @@ From the data check of an 11 Nov drive (23 km): "travelled with you" marked 57 a
   top two bits 01) are joined now; static and public addresses stay apart.
 - With *Group same device* on, a group showed the spread of its loudest address; it now shows the
   spread of all its addresses.
+- An iBeacon frame (company 004C, data `02 15`) was *Apple device*; it is `ibeacon` on the Beacon
+  layer, since the company number is part of the format (Teslas send it, and stay on the Vehicle
+  layer by Fieldwatch's signature).
+- `VEHICLE_NAME` matched "L/A_MitsubishiAdp", the adapter of an air conditioner.
+- Radio panel: `.kv b` broke values in the middle of words (`word-break: break-all`); now
+  `overflow-wrap: anywhere`. The timeline title wrapped as three pieces when the *Bluetooth
+  paused* note was shown; it is one piece of text now.
 
 ### Changed
-- User guide 1.6 (Travelled rewritten; one device, many addresses), Mobile guide 1.5, README,
-  `config.ini.example` (what `travel_min_m` now means).
+- User guide 1.7 (Travelled rewritten, the Sit and short walks, *Always with me*; one device, many
+  addresses), Mobile guide 1.6, README, `config.ini.example` (what `travel_min_m` now means).
+  Guide figures `g_selected`, `g_detail` and `m_day` retaken with the new tags.
 
 ---
 

@@ -392,7 +392,7 @@ Collect with **both**: keep logging on and run a Sit; export **Log export CSV** 
 
 ## My devices
 
-Mark your own radios (router, PCs, phone, Ruuvi tags, car …) so they do not clutter the analysis: press **＋** on a Devices row or **＋ Mark as my device** in the map's detail panel, check the label and press **Add** (Analyze permission). Match by *Address is*, *Address starts with*, *Name is* or *Name contains*; Bluetooth phones, PCs and earbuds change their address, so match them by **name** (＋ chooses that by itself). **Hide my devices** (on by default) hides them from the list, the map and the Phone check. The rules are stored in `harava.db` and apply to every day.
+Mark your own radios (router, PCs, phone, Ruuvi tags, car …) so they do not clutter the analysis: press **＋** on a Devices row or **＋ Mark as my device** in the map's detail panel, check the label and press **Add** (Analyze permission). Match by *Address is*, *Address starts with*, *Name is* or *Name contains*; Bluetooth phones, PCs and earbuds change their address, so match them by **name** (＋ chooses that by itself). A watch or phone that sends no name can be caught by how it behaves: *Always with me, on layer* marks every device on that layer that travelled with you and was very close all the way (−55 dBm or stronger, at two of your stops or for ten minutes). It cannot tell whose the device is, so a passenger's phone of the same kind is marked too. **Hide my devices** (on by default) hides them from the list, the map and the Phone check. The rules are stored in `harava.db` and apply to every day.
 
 ## Phone check (classroom)
 
@@ -489,7 +489,7 @@ Local only, never in git: `config.ini`, `api_keys.py`, `harava.db` (radio data),
 python -m unittest discover -s tests -v
 ```
 
-About fifty tests with Python's own `unittest`, done in a second or two. They use made-up radios in a temporary database, so your `harava.db`, users, `archive/` and local rules are not touched. They cover the importers, both forms of Fieldwatch's `raw` field (before and from 1.1.43), the Find My and Ruuvi decoders, the identification database (every rule well formed), the layers (every Fieldwatch class has a layer, every layer a colour), storing without duplicates, the upload limits, the CSV export and the sign-in guard.
+About seventy tests with Python's own `unittest`, done in a second or two. They use made-up radios in a temporary database, so your `harava.db`, users, `archive/` and local rules are not touched. They cover the importers, both forms of Fieldwatch's `raw` field (before and from 1.1.43), the Find My and Ruuvi decoders, the identification database (every rule well formed), the layers (every Fieldwatch class has a layer, every layer a colour), storing without duplicates, the linking of changing addresses, stops and travel, the upload limits, the CSV export and the sign-in guard.
 
 **After a Fieldwatch update**, put a fresh log export into `data/` and run the tests. The `LocalExports` tests read the newest real exports there and compare Fieldwatch's own signatures with what Harava decodes from the same rows (Ruuvi temperatures, Find My messages, the log's columns, signature names). If Fieldwatch has changed its log format, they fail and tell which check — before the change distorts results. Without exports in `data/` these tests are skipped.
 

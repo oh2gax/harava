@@ -363,6 +363,41 @@ class Rules(TempStore):
         self.assertEqual(hv["id"], "company")
         self.assertIn("Ruuvi", hv["company"])
 
+    def test_rules_of_the_road(self):
+        for name, want, layer in (("ECO16BT 1a2b3c", "name-ensto-thermostat", "Thermostat"),
+                                  ("SE5000-0001234567", "name-tachograph", "Vehicle"),
+                                  ("FMC130_1234567_LE", "name-teltonika", "Vehicle"),
+                                  ("OBDII", "name-obd", "Vehicle"),
+                                  ("Scooter1", "name-scooter", "Vehicle"),
+                                  ("nut", "name-nut", "Tracker"),
+                                  ("ET-2860 Series", "name-epson-printer", "Printer"),
+                                  ("HD 450BT", "name-audio", "Audio"),
+                                  ("HUAWEI Band 9-6B1", "name-wearable", "Wearable"),
+                                  ("L/A_MitsubishiAdp", "name-mitsubishi-ac", "Home & IoT")):
+            hv = H.identify("BLE", name, "", "", "")
+            self.assertEqual((hv["id"], hv["layer"]), (want, layer), name)
+        self.assertNotEqual(H.classify("", "L/A_MitsubishiAdp", "BLE")[1], "Vehicle")     # an air conditioner
+        self.assertEqual(H.classify("", "Mitsubishi Outlander", "BLE")[1], "Vehicle")     # a car
+        self.assertIsNone(H.identify("BLE", "Nutella jar", "", "", ""))
+
+    def test_ibeacon_is_not_apple(self):
+        frame = "0215" + "AB" * 16 + "00010002C5"
+        for mfg, raw in (("4C", frame), ("4C", "0201061AFF4C00" + frame)):
+            hv = H.identify("BLE", "", mfg, raw, "")
+            self.assertEqual((hv["id"], hv["layer"]), ("ibeacon", "Beacon"))
+            self.assertNotIn("Apple", hv["company"])
+        self.assertEqual(H.identify("BLE", "", "4C", "0900", "")["company"], "Apple, Inc.")
+
+    def test_advertisement_with_nothing_in_it(self):
+        hv = H.identify("BLE", "", "", "020106", "")
+        self.assertEqual((hv["id"], hv["layer"]), ("no-data", ""))
+        self.assertEqual(H.identify("BLE", "", "", "0201060201060A00"[:6] + "020A00", "")["id"], "no-data")   # flags + power
+        self.assertIsNone(H.identify("BLE", "", "", "", ""))                       # a Sit row: no advertisement at all
+        self.assertNotEqual((H.identify("BLE", "A name", "", "020106", "") or {}).get("id"), "no-data")
+        # still unidentified, and the Workbench keeps it on its "No data" tab
+        row = {"kind": "BLE", "ident_id": "no-data", "ident_conf": "high", "category": "Unidentified"}
+        self.assertEqual(H._wb_tab(row, True), "nodata")
+
     def test_a_local_rule_comes_first(self):
         with open(H.LOCAL_RULES, "w", encoding="utf-8") as fh:
             json.dump({"rules": [{"id": "local-test", "name": "My own thing", "layer": "Sensor", "confidence": "low",
@@ -666,6 +701,72 @@ class Travel(TempStore):
         H.import_bytes("fieldwatch-sit-test.csv", sit.encode(), None, 0, None)
         d = self.devices()[0]
         self.assertEqual((d["travel"], d["travelled"], d["travel_at"]), ("", False, []))
+
+    SIT_HEAD = "kind,mac,name,first_seen,last_seen,hits,rssi_max,rssi_min,signatures,lat,lon\n"
+
+    @staticmethod
+    def iso(sec):
+        import datetime
+        return datetime.datetime.fromtimestamp((T0 + sec * 1000) / 1000, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    def test_sit_times_are_placed_on_the_phones_track(self):
+        """A Sit row has one position but two times. Where the phone was at those times tells the rest."""
+        both, road, home = "4A:00:00:00:00:41", "4A:00:00:00:00:42", "4A:00:00:00:00:43"
+        sit = self.SIT_HEAD + "".join(
+            f"BLE,{mac},,{self.iso(a)},{self.iso(b)},{hits},-60,-90,,60.0,25.0\n"
+            for mac, a, b, hits in ((both, 120, 1300, 200),        # first heard at A, last heard at B
+                                    (road, 660, 840, 40),          # only on the way: 3 min, 2 km
+                                    (home, 60, 500, 90)))          # only at A
+        H.import_bytes("log.csv", log_csv(self.day()), None, 0, None)
+        H.import_bytes("fieldwatch-sit-test.csv", sit.encode(), None, 0, None)
+        d = {x["mac"]: x for x in self.devices()}
+        self.assertEqual((d[both]["travel"], d[both]["travel_stops"]), ("stops", 2))
+        self.assertEqual(d[road]["travel"], "road")
+        self.assertAlmostEqual(d[road]["travel_km"], 2.0, delta=0.1)
+        self.assertEqual(d[home]["travel"], "")
+
+    def walk(self):
+        """Six minutes on foot, 330 m north, without a stop."""
+        w, weak, fixed = "4A:00:00:00:00:51", "4A:00:00:00:00:52", "C4:00:00:00:00:53"
+        rows = []
+        for sec in range(0, 361, 20):
+            lat, lon = f"{60.0 + 0.003 * sec / 360:.6f}", "25.000000"
+            rows.append(log_row(T0 + sec * 1000, "WIFI", self.FA, "Net-A", -60 - sec // 6, lat=lat, lon=lon))
+            rows.append(log_row(T0 + sec * 1000, "BLE", w, "", -70, lat=lat, lon=lon))        # beside the phone
+            rows.append(log_row(T0 + sec * 1000, "BLE", weak, "", -92, lat=lat, lon=lon))     # far behind, or a strong beacon
+            if sec <= 80:
+                rows.append(log_row(T0 + sec * 1000, "BLE", fixed, "", -75, lat=lat, lon=lon))
+        return rows, w, weak, fixed
+
+    def test_beside_you_on_a_short_walk(self):
+        rows, w, weak, fixed = self.walk()
+        H.import_bytes("log.csv", log_csv(rows), None, 0, None)
+        d = {x["mac"]: x for x in self.devices()}
+        self.assertEqual(d[w]["travel"], "road")
+        self.assertAlmostEqual(d[w]["travel_km"], 0.3, delta=0.05)
+        self.assertEqual(d[w]["travel_min"], 6)
+        self.assertEqual(d[weak]["travel"], "")            # heard all the way, but never strongly
+        self.assertEqual(d[fixed]["travel"], "")           # strong, but only where it stands
+        self.assertEqual(d[self.FA]["travel"], "")         # Wi-Fi carries far: not judged this way
+
+    def test_companion(self):
+        H.import_bytes("log.csv", log_csv(self.day()), None, 0, None)
+        d = {x["mac"]: x for x in self.devices()}
+        self.assertTrue(d[self.X]["companion"])            # at both stops, and at -50 dBm
+        self.assertFalse(d[self.Y]["companion"])           # same road, at -90 dBm
+        self.assertFalse(d[self.FA]["companion"])
+        rows, w, _weak, _fixed = self.walk()
+        H.import_bytes("walk.csv", log_csv([r.replace(",-70,", ",-50,") for r in rows]), None, 0, None)
+        self.assertFalse({x["mac"]: x for x in self.devices()}[w]["companion"])    # close, but only for six minutes
+
+    def test_always_with_me_is_a_kind_of_my_device(self):
+        c = H.app.test_client()
+        post = lambda body: c.post("/api/own", json=body, headers={"Origin": "http://localhost"})       # noqa: E731
+        self.assertEqual(post({"match": "companion", "kind": "BLE", "value": "android / google", "label": "My watch"}).status_code, 200)
+        self.assertEqual(post({"match": "companion", "value": "any", "label": "Anything"}).status_code, 200)
+        self.assertEqual(post({"match": "companion", "value": "No such layer", "label": "x"}).status_code, 400)
+        own = {o["label"]: o for o in c.get("/api/own").get_json()["own"]}
+        self.assertEqual(own["My watch"]["value"], "Android / Google")          # stored as the layer is written
 
     def test_api_and_export(self):
         H.import_bytes("log.csv", log_csv(self.day()), None, 0, None)

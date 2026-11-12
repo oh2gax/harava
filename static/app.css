@@ -186,7 +186,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent-dim); }
 .pill.ghost { background: var(--bg-base); color: var(--text-secondary); border: 1px solid var(--border); font-weight: 500; }
 .kv { display: grid; grid-template-columns: 92px 1fr; gap: 3px 8px; margin-top: 8px; font-size: 12px; }
 .kv span { color: var(--text-secondary); }
-.kv b { font-weight: 500; color: var(--text-primary); word-break: break-all; }
+.kv b { font-weight: 500; color: var(--text-primary); overflow-wrap: anywhere; min-width: 0; }
 .kv b.acc { color: var(--accent); font-weight: 650; }
 .kv b.warn { color: var(--red); font-weight: 650; }
 .kv b.ok { color: var(--green); font-weight: 650; }

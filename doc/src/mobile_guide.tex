@@ -54,7 +54,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava Mobile app --- what your phone heard, in your pocket}
-\fancyhead[R]{\small\itshape Mobile app user guide, version 1.5 --- November 2026}
+\fancyhead[R]{\small\itshape Mobile app user guide, version 1.6 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava Mobile app - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -82,7 +82,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.5 \quad$\cdot$\quad 12 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.6 \quad$\cdot$\quad 12 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava Mobile app}\par\vspace{5pt}
 {\large\bfseries The map, the day, the watch list, every radio, the phone check and uploads ---\\ on your phone, one view at a time}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -181,7 +181,7 @@ A choice made with a row of \emph{chips} (round buttons) or a \emph{switch} take
 \textbf{Layer} --- one device layer only, for example \emph{Tracker} or \emph{Home \& IoT}; the numbers tell how many the other choices leave.\par\smallskip
 \textbf{Group same device} --- the changing Bluetooth addresses of one device as one radio, when Harava has proof that they belong together (a Bluetooth Mesh number, the Google advertisement or day code of an Android phone or watch, or the same service and name). On by default.\par\smallskip
 \textbf{Hide my devices} --- leaves out your own devices (\emph{My devices}). On by default.\par\smallskip
-\textbf{Travelled with me} --- only radios that were at two of your stops at least 500\,m apart (\emph{at N stops}: devices in your car or bag, or someone travelling with you), or beside you for minutes while you moved (\emph{same road}: usually other traffic).\par\smallskip
+\textbf{Travelled with me} --- only radios that were at two of your stops at least 500\,m apart (\emph{at N stops}: devices in your car or bag, or someone travelling with you), or beside you for minutes while you moved (\emph{same road}: usually other traffic; on a short walk, a device that stayed close to you for five minutes or more).\par\smallskip
 \textbf{Named or identified} --- only radios that tell a name, have a Fieldwatch signature or are identified by Harava.\par\smallskip
 \textbf{Heard only in Sit} --- only radios that only a Sit export has (the log missed them).
 \end{minipage}
@@ -214,7 +214,7 @@ The filter applies to the Map, the Day counts, the Watch list (except the layer 
 % ─────────────────────────────────────────────────────────────────────
 \section{Day}\label{sec:day}
 
-\phones{m_day.jpg}{m_day2.jpg}{m_dark.jpg}{fig:day}{The Day view: the counts and the hears per 10 minutes (left); the device layers and the most common identifications (middle); the same in the dark theme (right).}
+\phones{m_day.jpg}{m_day2.jpg}{m_dark.jpg}{fig:day}{The Day view: the counts and the hears per 10 minutes (left; \emph{Travelled} counts the devices at your stops, with the same-road ones under it, and leaves out My devices); the device layers and the most common identifications (middle); the same in the dark theme (right).}
 
 The Day view tells the whole day in numbers (Figure~\ref{fig:day}):
 \begin{itemize}[leftmargin=1.2em]
@@ -250,7 +250,7 @@ Tap a row for the radio's page.
 \lead{A radio's page} (Figure~\ref{fig:dev}, middle and right) opens with a tap on a row, a card or a Watch list row. It shows the name and address, its layer and kind, how it was identified (\emph{Identified as}, company, Fieldwatch signatures, maker), how many addresses belong to the same device, the hears, first and last time, strongest and median signal, the places and how far apart they were, the raw advertisement and the days it was heard. Below them:
 \begin{itemize}[leftmargin=1.2em]
 \item \ui{Show on map} --- back to the map, zoomed to the radio, with its card open;
-\item \ui{＋ My device} (Analyze permission) --- marks the radio as yours, with a label you type. A Bluetooth radio with a name is matched by its name (its address changes); others by their address. From then on \ui{Hide my devices} leaves it out, and the Phone check never counts it;
+\item \ui{＋ My device} (Analyze permission) --- marks the radio as yours, with a label you type. A Bluetooth radio with a name is matched by its name (its address changes); others by their address. A Bluetooth device \emph{without} a name that travelled with you and was very close all the way (the \emph{Travelled} row says so) is saved as \emph{Always with me} on its layer: that marks everything on the layer that behaves like this, on every day --- your watch under all its addresses, but also a passenger's phone of the same kind. From then on \ui{Hide my devices} leaves it out, and the Phone check never counts it;
 \item \textbf{Signal} --- the signal strength of every hear over the day;
 \item \textbf{the map} --- every place your phone heard it (bigger = louder), joined in time order. A radio that follows your path travelled with you; one that stays in one spot was fixed there.
 \end{itemize}

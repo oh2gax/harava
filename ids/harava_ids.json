@@ -1,6 +1,6 @@
 {
   "name": "Harava identification database",
-  "version": "2026-11-12.1",
+  "version": "2026-11-12.2",
   "description": "Harava's own rules for radios that Fieldwatch's signatures leave unidentified. Rules are tried in order; the first that matches wins. A rule only changes the layer of a radio that Fieldwatch did not identify; for the others it adds the 'Identified as' text. Company names come from bt_assigned_numbers.json (Bluetooth SIG).",
   "schema": {
     "match (all given conditions must hold)": {
@@ -210,7 +210,7 @@
       "confidence": "medium",
       "match": {
         "kind": "BLE",
-        "name_regex": "buds|airpods|beats|\\bjbl\\b|bose|soundlink|tune \\d|wh-1000|wf-1000|jabra|sennheiser|marshall|\\bear\\b"
+        "name_regex": "buds|airpods|beats|\\bjbl\\b|bose|soundlink|tune \\d|wh-1000|wf-1000|jabra|sennheiser|marshall|\\bear\\b|epos|\\bhd \\d{3}bt|voyager|jlab|soundcore|\\bdime\\d"
       }
     },
     {
@@ -220,7 +220,7 @@
       "confidence": "medium",
       "match": {
         "kind": "BLE",
-        "name_regex": "galaxy watch|galaxy fit|fitbit|garmin|amazfit|mi band|polar |suunto|oura|whoop"
+        "name_regex": "galaxy watch|galaxy fit|fitbit|garmin|amazfit|mi band|polar |suunto|oura|whoop|huawei (band|watch)|honor (band|watch)|watch fit"
       }
     },
     {
@@ -254,6 +254,237 @@
         "kind": "BLE",
         "name_regex": "^Ruuvi "
       }
+    },
+    {
+      "id": "name-ensto-thermostat",
+      "name": "Ensto thermostat (ECO16BT or ELTE6-BT)",
+      "layer": "Thermostat",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^(ECO16BT|ELTE6-BT)\\b"
+      },
+      "note": "By name. Ensto's Bluetooth thermostats for floor and room heating tell their model and the end of their address as the name; they are set with Ensto's phone app. The address is fixed."
+    },
+    {
+      "id": "name-ensto-ev",
+      "name": "Ensto EV charger",
+      "layer": "EV charger",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^EVH\\d{6,}"
+      },
+      "note": "By name: EVH and a serial number, the form Ensto's EV chargers use. They also send Ensto's company number and a service of their own."
+    },
+    {
+      "id": "name-evse",
+      "name": "EV charger",
+      "layer": "EV charger",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^EVSE[-_ ]?\\d"
+      },
+      "note": "By name: EVSE (electric vehicle supply equipment) and a number. Several makers name their chargers this way; the maker is not told."
+    },
+    {
+      "id": "name-obd",
+      "name": "OBD diagnostic dongle (plugged into a car)",
+      "layer": "Vehicle",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^(OBDeleven|OBDLink|OBDII|OBD2?|NEXAS\\d|vLinker|V-?LINK|Carista|Veepeak|ELM327|KONNWEI|Vgate)\\b"
+      },
+      "note": "By name. A dongle in a car's diagnostic socket that a phone app talks to. It is in a car, and usually stays there."
+    },
+    {
+      "id": "name-teltonika",
+      "name": "Teltonika vehicle tracker (fleet GPS unit)",
+      "layer": "Vehicle",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^FM[A-Z]?\\d{3}_\\d+_LE$"
+      },
+      "note": "By name: the model (FMB, FMC, FMM ...), a serial number and _LE, the form Teltonika's fleet trackers use. It is wired into a vehicle by its owner or operator and reports the vehicle's position over the mobile network; it is on the Vehicle layer because it tells of a vehicle nearby, not of something tracking you."
+    },
+    {
+      "id": "name-tachograph",
+      "name": "Stoneridge SE5000 tachograph (lorry or bus)",
+      "layer": "Vehicle",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^SE5000-\\d+"
+      },
+      "note": "By name. The SE5000 is a digital tachograph, the driving-time recorder of a lorry or a bus; newer ones have Bluetooth for the driver's app."
+    },
+    {
+      "id": "name-scooter",
+      "name": "Shared e-scooter",
+      "layer": "Vehicle",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Scooter\\d+$"
+      },
+      "note": "By name. Rental scooters of one fleet were seen to share a name like this, each with a fixed address of its own. The operator is not told."
+    },
+    {
+      "id": "name-polestar",
+      "name": "Polestar car",
+      "layer": "Vehicle",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Polestar ?\\d"
+      },
+      "note": "By name: the car advertises its model for the phone-as-key."
+    },
+    {
+      "id": "name-volvo",
+      "name": "Volvo car",
+      "layer": "Vehicle",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^(EX ?\\d0|VOLVO\\d*)$"
+      },
+      "note": "By name: the model name alone (EX90 ...) or VOLVO and a number. A guess from the name."
+    },
+    {
+      "id": "name-s3xy",
+      "name": "S3XY buttons or light strip (Tesla accessory)",
+      "layer": "Vehicle",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^S3XY_"
+      },
+      "note": "By name. An accessory fitted inside a Tesla."
+    },
+    {
+      "id": "name-driversnote",
+      "name": "Driversnote mileage beacon (in a car)",
+      "layer": "Vehicle",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Driversnote$"
+      },
+      "note": "By name. A small beacon kept in a car so that a mileage-log app on the driver's phone knows when a trip starts."
+    },
+    {
+      "id": "name-nut",
+      "name": "Nut tracker tag",
+      "layer": "Tracker",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^nut$"
+      },
+      "note": "By name. Nut key finders advertise the name nut. A tag of this kind has no finding network of its own like Apple's or Google's: it only rings and reports through its owner's phone app."
+    },
+    {
+      "id": "name-sumup",
+      "name": "SumUp card reader",
+      "layer": "",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^SumUp \\d"
+      },
+      "note": "By name. A payment terminal of a shop, a market stall or a taxi."
+    },
+    {
+      "id": "name-brother-printer",
+      "name": "Brother label or mobile printer",
+      "layer": "Printer",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^(RJ|QL|PT|TD|PJ)-\\d{3,4}[A-Z]*_\\d{4}$"
+      },
+      "note": "By name: a Brother model number and the end of the serial number."
+    },
+    {
+      "id": "name-epson-printer",
+      "name": "Epson printer",
+      "layer": "Printer",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^(ET|WF|XP|EW|L)-\\d{3,5}\\w* Series$"
+      },
+      "note": "By name: an Epson model series."
+    },
+    {
+      "id": "name-resmed",
+      "name": "ResMed sleep apnoea machine (CPAP)",
+      "layer": "Health",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^ResMed \\d"
+      },
+      "note": "By name. A bedside breathing machine; it tells of a bedroom, and of its user's health, so mind where you publish it."
+    },
+    {
+      "id": "name-wilo",
+      "name": "Wilo heating pump",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Stratos (MAXO|PICO|GIGA)"
+      },
+      "note": "By name: a circulation pump in a building's heating room."
+    },
+    {
+      "id": "name-mitsubishi-ac",
+      "name": "Mitsubishi Electric air-conditioner adapter",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^L/A_Mitsubishi"
+      },
+      "note": "By name: the wireless adapter of an air conditioner or heat pump. Not a car."
+    },
+    {
+      "id": "name-gree-ac",
+      "name": "Gree air conditioner",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^GR-AC_"
+      },
+      "note": "By name: an air conditioner or heat pump by Gree, also sold under other brands."
+    },
+    {
+      "id": "name-bed",
+      "name": "Adjustable bed (motor control)",
+      "layer": "Home & IoT",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^(OKIN-\\d|VIBRADORM)"
+      },
+      "note": "By name: the motor control of an adjustable bed, used with a phone app."
+    },
+    {
+      "id": "name-ipstube",
+      "name": "IPSTube desk clock",
+      "layer": "Home & IoT",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^IPSTube_"
+      },
+      "note": "By name: a desk clock with small displays in place of nixie tubes."
     },
     {
       "id": "windows-3e1d",
@@ -530,6 +761,19 @@
       }
     },
     {
+      "id": "ibeacon",
+      "name": "iBeacon (beacon of any maker)",
+      "layer": "Beacon",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "mfg_data_prefix": "0215"
+      },
+      "note": "The iBeacon frame: Apple's company number, then 02 15, a 16-byte UUID, two numbers and the calibrated power. Apple defined the format and anyone may send it, so the company number says nothing about the maker: shop and museum beacons, door readers and some cars (Tesla) use it. When Fieldwatch has a signature for the UUID, the Signatures column tells whose it is.",
+      "company": "(iBeacon format: the maker is not told)"
+    },
+    {
       "id": "apple-other",
       "name": "Apple device",
       "layer": "Apple device",
@@ -594,6 +838,57 @@
         "name_regex": "^beha"
       },
       "note": "Seen with the text 'Beha heater' in its manufacturer data."
+    },
+    {
+      "id": "ensto-ev-charger",
+      "name": "Ensto EV charger",
+      "layer": "EV charger",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "0628",
+        "uuid128_any": [
+          "CDC00001-3FC6-4060-BE52-E966B7F2C52C"
+        ]
+      },
+      "note": "Ensto's company number together with the service UUID that its EV chargers advertise for the installer's and owner's app."
+    },
+    {
+      "id": "ensto-thermostat-data",
+      "name": "Ensto thermostat (ECO16BT)",
+      "layer": "Thermostat",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "2806",
+        "mfg_data_prefix": "45434F3136"
+      },
+      "note": "Manufacturer data that begins with the text ECO16: the thermostat writes its model there. The company number in front of it reads 0x2806, Ensto's 0x0628 with its two bytes the other way round."
+    },
+    {
+      "id": "casambi",
+      "name": "Casambi lighting (lamp, sensor or switch)",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "mfg": "03C3"
+      },
+      "note": "Casambi's company number. Casambi is a Bluetooth lighting-control system built into the lamps, sensors and switches of many makers; the name tells the product."
+    },
+    {
+      "id": "serial-module",
+      "name": "Bluetooth serial module (HM-10 type)",
+      "layer": "",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "mfg": "4D48",
+        "service_uuid_any": [
+          "FFE0"
+        ]
+      },
+      "note": "Manufacturer data that begins with the letters HM followed by the module's own address, and the service FFE0: the stock firmware of the HM-10 family of serial modules. Such a module is a building block; what it is built into, the name may tell (a car diagnostic dongle, a hobby project, a tool)."
     },
     {
       "id": "oneplus",
