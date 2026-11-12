@@ -336,7 +336,8 @@ function renderStats(list) {
     $('stWifi').textContent = list.filter(d => d.kind === 'WIFI').length;
     $('stBle').textContent = list.filter(d => d.kind === 'BLE').length;
     $('stTrk').textContent = list.filter(d => d.category === 'Tracker').length;
-    $('stTrv').textContent = list.filter(d => d.travelled).length;
+    const atStops = list.filter(d => d.travel === 'stops').length, onRoad = list.filter(d => d.travel === 'road').length;
+    $('stTrv').innerHTML = `${atStops}${onRoad ? `<small title="${onRoad} more shared the road for minutes but were never at two of your stops"> +${onRoad} road</small>` : ''}`;
     $('navDevCnt').textContent = list.length ? list.length.toLocaleString() : '';
 }
 
@@ -486,7 +487,7 @@ async function selectDevice(kind, mac, fly) {
     const r = await api(`/api/device?kind=${encodeURIComponent(kind)}&mac=${encodeURIComponent(mac)}&${rangeQuery()}`);
     const d = r.device;
     const base = d && S.devices.find(x => x.kind === kind && x.mac === mac);
-    if (base) { d.group_size = base.group_size; d.group_name = base.group_name; d.group = base.group; }  // grouping is across all addresses
+    if (base) carryAcross(d, base);
     const P = $('detailPanel');
     selLayer.clearLayers();
     if (!d) { P.classList.add('hidden'); return; }
@@ -497,7 +498,7 @@ async function selectDevice(kind, mac, fly) {
         <div class="panel-title">Selected radio <span class="r panel-close" onclick="closeDetail()">✕</span></div>
         <div class="dev-name">${esc(d.name || (d.kind === 'WIFI' ? '(hidden network)' : '(no name)'))}</div>
         <div class="dev-mac">${esc(d.mac)}</div>
-        <span class="pill" style="background:${col}">${esc(d.category)}</span><span class="pill ghost">${d.kind === 'WIFI' ? 'Wi-Fi ' + esc(d.band) : 'Bluetooth LE'}</span>${d.travelled ? '<span class="pill" style="background:#f59e0b">travelled ' + fmtM(d.spread_m) + '</span>' : ''}${d.phones > 1 ? '<span class="pill ghost">heard by ' + d.phones + ' phones</span>' : ''}
+        <span class="pill" style="background:${col}">${esc(d.category)}</span><span class="pill ghost">${d.kind === 'WIFI' ? 'Wi-Fi ' + esc(d.band) : 'Bluetooth LE'}</span>${d.travel === 'stops' ? `<span class="pill" style="background:#f59e0b">at ${d.travel_stops} stops with you</span>` : d.travel === 'road' ? '<span class="pill ghost">same road</span>' : ''}${d.phones > 1 ? '<span class="pill ghost">heard by ' + d.phones + ' phones</span>' : ''}
         <div class="kv">
             <span>Signatures</span><b>${esc(d.fleets || '–')}${d.reclass ? ` <span style="color:var(--text-muted);font-weight:400" title="Fieldwatch's signature put this radio on the ${esc(d.reclass)} layer. Harava read the advertisement and moved it: see Identified as.">· layer by Harava</span>` : ''}</b>
             ${d.ident ? `<span>Identified as</span><b>${identHtml(d)} <span class="conf-pill">${esc(d.ident_conf)}</span>${d.class === 'HARAVA' || !d.fleets || d.reclass ? ' <span style="color:var(--text-muted)">· Harava database</span>' : ''}</b>` : ''}
@@ -512,6 +513,7 @@ async function selectDevice(kind, mac, fly) {
             ${d.kind === 'WIFI' ? `<span>Channel</span><b>${esc(d.channel)} · ${d.freq} MHz</b>` : ''}
             <span>Flags</span><b>${esc(d.flags || '–')}</b>
             <span>Places</span><b>${d.places} · spread ${fmtM(d.spread_m)}</b>
+            ${d.travel ? `<span>Travelled</span><b${d.travel === 'stops' ? ' class="amb"' : ''}>${esc(travelText(d))}${travelWhen(d) ? `<div style="color:var(--text-secondary);font-weight:400">at your stops ${esc(travelWhen(d))}</div>` : ''}</b>` : ''}
             ${d.mfg ? `<span>Company ID</span><b class="mono">0x${esc(d.mfg)}</b>` : ''}
             ${d.uuids ? `<span>Services</span><b class="mono">${esc(d.uuids.replace(/0000(\w{4})-0000-1000-8000-00805F9B34FB/gi, '$1'))}</b>` : ''}
             ${d.vendor_ie ? `<span>Vendor IEs</span><b class="mono">${esc(d.vendor_ie)}</b>` : ''}
@@ -552,7 +554,9 @@ async function selectDevice(kind, mac, fly) {
 function groupLabel(g) {
     if (!g) return '';
     const [kind, val] = [g.slice(0, g.indexOf(':')), g.slice(g.indexOf(':') + 1)];
-    const what = { 'mesh-unprovisioned': 'Mesh device UUID', 'mesh-network': 'Mesh network ID', 'uuid128': 'custom service UUID' }[kind] || kind;
+    const what = { 'mesh-unprovisioned': 'Mesh device UUID', 'mesh-device': 'Mesh device UUID', 'mesh-network': 'Mesh network ID', 'uuid128': 'custom service UUID',
+        'google-day-code': 'Google day code', 'google-fcf1': 'same Google advertisement', 'google-fef3': 'same Google advertisement' }[kind] || kind;
+    if (kind === 'google-day-code') return `${what} ${(val.match(/../g) || []).map(h => String.fromCharCode(parseInt(h, 16))).join('')}`;
     return `${what} ${val.length > 24 ? val.slice(0, 24) + '…' : val}`;
 }
 function closeDetail() { S.selected = null; $('detailPanel').classList.add('hidden'); selLayer.clearLayers(); }
@@ -580,7 +584,7 @@ function renderTable(list) {
     $('devBody').innerHTML = rows.slice(0, TABLE_MAX).map(d => {
         const key = d.kind + '|' + d.mac;
         const tags = (d._n > 1 ? `<span class="tag" title="${d._n} changing addresses of one device">${d._n} addr.</span>` : '') +
-            (d.travelled ? '<span class="tag amb">travelled</span>' : '') +
+            travelTag(d, 'tag') +
             (d.phones > 1 ? `<span class="tag" title="Heard by ${d.phones} phones in the data you look at">${d.phones} phones</span>` : '') +
             (d.vr ? '<span class="tag">VR?</span>' : '') +
             (d.in_sit && !d.log_rows ? '<span class="tag" title="Only the Sit export has this radio; the log missed it">sit only</span>' : '') +
@@ -613,7 +617,7 @@ function sortBy(k) { S.sort = { key: k, dir: S.sort.key === k ? -S.sort.dir : ([
 function openFromTable(kind, mac) { showView('map'); selectDevice(kind, mac, true); }
 function exportCsv() {
     const list = filtered();
-    const cols = ['own', 'kind', 'mac', 'name', 'vendor', 'category', 'ident', 'ident_conf', 'company', 'group', 'group_size', 'fleets', 'hears', 'log_rows', 'sit_hits', 'first', 'last', 'rssi_max', 'rssi_med', 'channel', 'freq', 'band', 'flags', 'spread_m', 'places', 'travelled', 'tracker_mode', 'lat', 'lon', 'mfg', 'uuids', 'raw'];
+    const cols = ['own', 'kind', 'mac', 'name', 'vendor', 'category', 'ident', 'ident_conf', 'company', 'group', 'group_size', 'fleets', 'hears', 'log_rows', 'sit_hits', 'first', 'last', 'rssi_max', 'rssi_med', 'channel', 'freq', 'band', 'flags', 'spread_m', 'places', 'travelled', 'travel', 'travel_stops', 'travel_km', 'travel_min', 'tracker_mode', 'lat', 'lon', 'mfg', 'uuids', 'raw'];
     // a name heard on the air may start with = + - or @, which a spreadsheet would run as a formula
     const q = v => {
         if (typeof v === 'string' && /^[=+\-@\t\r]/.test(v)) v = "'" + v;

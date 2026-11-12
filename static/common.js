@@ -149,9 +149,39 @@ function groupSame(list) {
         }
     }
     for (const g of seen.values()) {
-        if (g._n > 1) { g.hears = g._hears; g.first = g._first; g.last = g._last; if (!g.name && g.group_name) g.name = g.group_name; }
+        if (g._n > 1) {
+            g.hears = g._hears; g.first = g._first; g.last = g._last; if (!g.name && g.group_name) g.name = g.group_name;
+            if (g.group_spread_m != null) g.spread_m = g.group_spread_m;     // the device's spread, not one address's
+        }
     }
     return out;
+}
+
+// A radio's own page is built from that address alone. What is judged across all radios (which addresses
+// are one device, and how that device travelled along the phone's whole track) comes from the list.
+function carryAcross(d, base) {
+    for (const k of ['group', 'group_size', 'group_name', 'group_spread_m', 'travel', 'travelled', 'travel_stops', 'travel_km', 'travel_min', 'travel_at']) d[k] = base[k];
+}
+
+// ── Travelled with the phone ──
+// The server cuts the phone's own track into stops and movement, and gives each device a level:
+// 'stops' = heard at two stops far apart (it was with the phone at both: the strong sign),
+// 'road'  = heard for minutes while the phone moved (shared the road: expected in traffic).
+function travelTag(d, cls) {
+    if (d.travel === 'stops') return `<span class="${cls} amb" title="Heard at ${d.travel_stops} of your stops, ${d.travel_km} km apart">at ${d.travel_stops} stops</span>`;
+    if (d.travel === 'road') return `<span class="${cls}" title="Heard for ${d.travel_min} min while you moved ${d.travel_km} km; never at two stops">same road</span>`;
+    return '';
+}
+function travelText(d) {
+    if (d.travel === 'stops') return `With you at ${d.travel_stops} stops, ${d.travel_km} km apart`;
+    if (d.travel === 'road') return `Same road for ${d.travel_min} min, ${d.travel_km} km` + (d.travel_stops ? ', from a stop' : '');
+    return '';
+}
+function travelWhen(d) {            // the stops where it was heard: "11:21–13:46, 14:25–14:59"
+    const hm = ms => { const t = new Date(ms); return pad(t.getHours()) + ':' + pad(t.getMinutes()); };
+    const day = ms => { const t = new Date(ms); return t.getDate() + '.' + (t.getMonth() + 1) + '. '; };
+    const at = d.travel_at || [], many = at.length && new Date(at[0][0]).toDateString() !== new Date(at[at.length - 1][1]).toDateString();
+    return at.map(v => (many ? day(v[0]) : '') + hm(v[0]) + '–' + hm(v[1])).join(', ');
 }
 
 // ── Phone check (classroom): which radios count as phones, and where the box limit goes ──

@@ -2,14 +2,14 @@
   {
     "file": "Harava_User_Guide.pdf",
     "title": "Harava – User guide",
-    "description": "How to collect with Fieldwatch so that nothing is missed (log and Sit, and keeping the screen on for Bluetooth), signing in and the three permissions, importing without duplicates (every hear once per phone, the result of each file, coverage), your own and shared data, ranges of several days, and how to read the map, the timeline (and where Bluetooth was paused), the selected-radio panel, the device layers (Glasses & VR, Trackers, Vehicles …), why an “AirTag” is usually an iPhone, the filters, the Devices page, Harava's own identification and My devices; the classroom Phone check step by step; Mask addresses for screenshots; what the data can and cannot tell, questions you can answer, limitations and a quick reference.",
-    "date": "2026-11-10"
+    "description": "How to collect with Fieldwatch so that nothing is missed (log and Sit, and keeping the screen on for Bluetooth), signing in and the three permissions, importing without duplicates (every hear once per phone, the result of each file, coverage), your own and shared data, ranges of several days, and how to read the map, the timeline (and where Bluetooth was paused), the selected-radio panel, the device layers (Glasses & VR, Trackers, Vehicles …), why an “AirTag” is usually an iPhone, how the changing addresses of one device are joined, what travelled with you (at your stops, or only on the same road), the filters, the Devices page, Harava's own identification and My devices; the classroom Phone check step by step; Mask addresses for screenshots; what the data can and cannot tell, questions you can answer, limitations and a quick reference.",
+    "date": "2026-11-12"
   },
   {
     "file": "Harava_Mobile_Guide.pdf",
     "title": "Harava Mobile app – User guide",
     "description": "The phone app at /app: opening it and adding it to the home screen, the top bar, the ☰ menu and the filter; the Map, Day and Watch list views (with the Bluetooth pauses on the Day graph, and real tags only on the Tracker layer); Devices and a radio's own page with ＋ My device; the Phone check and Identification; uploading Fieldwatch exports from the phone (phones, results, coverage, sharing); sharing an export from Fieldwatch straight to Harava; Until and Whose data; the Workbench for admins (status and notes, the advertisement decoded, hints, making and previewing rules); What's new, guides and Mask addresses; troubleshooting and a quick reference.",
-    "date": "2026-11-10"
+    "date": "2026-11-12"
   },
   {
     "file": "Harava_Admin_Guide.pdf",

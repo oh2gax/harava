@@ -4,6 +4,15 @@ Short notes for users, newest first. Each version is one day of development (v.D
 The full technical history is in CHANGELOG.md. The newest heading gives the version shown
 under the app name.
 
+## v.12112026 — What really travelled with you
+
+- **At your stops, or only on the same road** — *Travelled with me* used to mark every address heard 500 m apart, which on a motorway takes 18 seconds. Harava now finds your **stops** (the phone stayed within 150 m for five minutes or more) and gives two levels. **at N stops** (amber): the device was heard at two or more of your stops, at least 500 m apart, so it was with you at both. **same road** (grey): it was beside you for at least two minutes while you moved a kilometre or more, but never at two stops, which is normal in traffic. Anything you only passed gets no tag. On a 23 km drive the old rule marked 57 addresses; now it is one device at three stops and a dozen on the same road.
+- **Where and when** — the Selected radio panel has a *Travelled* row: at which of your stops the device was heard (by their times), or for how long and how far it shared the road. The *Travelled* count shows the devices at your stops, with the same-road ones beside it. The CSV export has the new columns `travel`, `travel_stops`, `travel_km` and `travel_min`.
+- **One Android phone or watch is one row** — an Android device changes its address about every nine minutes, so one watch used to look like dozens of radios. Its Google advertisement stays the same over several address changes, and one form of it carries a code that stays for about a day. Harava now joins those addresses (*N addr.* tag; the panel says *same Google advertisement* or *Google day code*). In four days of data 1,100 addresses folded into 300 devices. Google does not document these advertisements; the day code is what the data showed, and the rule's note says so.
+- **A device is judged as a whole** — travel is now decided for the device, not for each address: a watch that was at home under one address and at the destination under another was at both stops.
+- **Twenty scooters are twenty scooters** — radios with the same maker's service and the same name were joined into one device. That is right for earbuds, which keep their name while their address changes, and wrong for a fleet of rental scooters that are all named "Scooter1". Only addresses of the changing kind are joined now.
+- **Guides** — User guide 1.6 and Mobile guide 1.5 explain the stops and the two levels.
+
 ## v.10112026 — AirTags that are really iPhones, and Fieldwatch 1.1.43's new raw data
 
 - **An "AirTag" is usually an iPhone** — Fieldwatch's *Apple AirTags* signature matches every Apple Find My message, and iPhones, iPads, Macs and AirPods send those too. Harava now reads the kind of device from the message: *Apple device (Find My)* moves to the Apple device layer and *AirPods or Beats (Find My)* to Audio; only *Apple AirTag* and *Find My accessory or newer AirTag* stay on the Tracker layer. In the first three days of data, 320 of 352 "AirTags" were Apple's own devices.

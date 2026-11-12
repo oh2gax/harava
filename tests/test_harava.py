@@ -13,7 +13,8 @@ What they guard:
     advertisement from 1.1.43) and the decoders that read it (Find My, Ruuvi);
   * the identification database and the layers: every rule is well formed, every Fieldwatch
     signature class has a layer, every layer has a colour on the pages;
-  * storing without duplicates, the limits of uploads, the CSV export, the sign-in guard.
+  * storing without duplicates, the limits of uploads, the CSV export, the sign-in guard;
+  * linking the changing addresses of one device, and the travel levels (stops, same road).
 
 The last class, LocalExports, reads the real Fieldwatch exports in data/ when there are any
 (they are never in git, so elsewhere it is skipped). It cross-checks Fieldwatch's own signatures
@@ -287,6 +288,26 @@ class Rules(TempStore):
               "service_data_uuid", "service_data_regex", "service_uuid_any", "uuid128_any"}
     HEX = re.compile(r"(?:[0-9A-F]{2})*\Z")
 
+    def test_groups_are_well_formed(self):
+        n = 0
+        for r in H.HV["rules"]:
+            g = r.get("group")
+            if not g:
+                continue
+            n += 1
+            with self.subTest(rule=r["id"]):
+                self.assertFalse(set(g) - {"source", "uuid", "ad_type", "from", "to", "key", "label"})
+                self.assertIn(g.get("source", "ad"), ("mfg", "service_data", "ad"))
+                if g.get("source") == "service_data":
+                    self.assertRegex(g["uuid"], r"^[0-9A-F]{4}$")
+                elif g.get("source") != "mfg":
+                    self.assertRegex(g["ad_type"], r"^[0-9A-F]{2}$")
+                self.assertIsInstance(g.get("from", 0), int)
+                self.assertIsInstance(g.get("to", 1), int)
+                self.assertLess(g.get("from", 0), g.get("to", 99))
+                self.assertTrue(g.get("label"))
+        self.assertGreater(n, 5)
+
     def test_every_rule_is_well_formed(self):
         rules = H.HV["rules"]
         self.assertGreater(len(rules), 40)
@@ -504,6 +525,158 @@ class Store(TempStore):
         self.assertAlmostEqual(logged[1] / MIN, 20, delta=1)
         only_ble = [h for h in hears if h["kind"] == "BLE"]
         self.assertEqual(H.bluetooth_gaps(only_ble)[0], [])        # no Wi-Fi rows: nothing can be told
+
+
+# ── one device, many addresses ──────────────────────────────────────────────────────────────────
+def fcf1(data20):
+    return "020102" + "1716F1FC" + data20                     # Google service data FCF1, 20 bytes
+
+
+def fef3(code, rest18):
+    return "1E16F3FE" + "4A1723" + code.encode().hex().upper() + "1132" + rest18
+
+
+class Linking(TempStore):
+    A1, A2, A3 = "4A:00:00:00:00:01", "5B:00:00:00:00:02", "6C:00:00:00:00:03"       # resolvable private
+    S1, S2 = "C4:00:00:00:00:01", "D5:00:00:00:00:02"                                # static
+    UUID = "A1B2C3D4-0000-4000-8000-00805F9B34FB"
+
+    def load(self, rows):
+        H.import_bytes("log.csv", log_csv(rows), None, 0, None)
+        return {d["mac"]: d for d in self.devices()}
+
+    def test_address_kinds(self):
+        self.assertTrue(H.rotating_address("4A:00:00:00:00:01"))
+        self.assertTrue(H.rotating_address("7F:FF:00:00:00:01"))
+        self.assertFalse(H.rotating_address("C4:00:00:00:00:01"))      # static
+        self.assertFalse(H.rotating_address("00:1B:10:00:00:01"))      # a maker's own (public) address
+        self.assertFalse(H.rotating_address(""))
+
+    def test_same_google_advertisement_is_one_device(self):
+        one, other = "11" * 20, "22" * 20
+        d = self.load([log_row(T0, "BLE", self.A1, raw=fcf1(one)),
+                       log_row(T0 + 9 * MIN, "BLE", self.A2, raw=fcf1(one)),
+                       log_row(T0 + 9 * MIN, "BLE", self.A3, raw=fcf1(other))])
+        self.assertEqual(d[self.A1]["ident_id"], "google-fcf1")
+        self.assertEqual((d[self.A1]["group_size"], d[self.A2]["group_size"], d[self.A3]["group_size"]), (2, 2, 1))
+        self.assertEqual(d[self.A1]["group"], d[self.A2]["group"])
+        self.assertEqual(d[self.A1]["category"], "Android / Google")
+
+    def test_google_day_code_links_through_a_changed_advertisement(self):
+        d = self.load([log_row(T0, "BLE", self.A1, raw=fef3("Q0BB", "11" * 18)),
+                       log_row(T0 + 9 * MIN, "BLE", self.A2, raw=fef3("Q0BB", "22" * 18)),
+                       log_row(T0 + 9 * MIN, "BLE", self.A3, raw=fef3("ZZ99", "22" * 18))])
+        self.assertEqual(d[self.A1]["ident_id"], "google-fef3-day")
+        self.assertEqual(d[self.A1]["group"], d[self.A2]["group"])
+        self.assertTrue(d[self.A1]["group"].startswith("google-day-code:"))
+        self.assertEqual((d[self.A1]["group_size"], d[self.A3]["group_size"]), (2, 1))
+
+    def test_other_fef3_forms_link_only_when_identical(self):
+        odd = "1E16F3FE" + "000102" + "AA" * 24                       # not the 4A 17 23 form
+        odd2 = "1E16F3FE" + "000102" + "BB" * 24
+        d = self.load([log_row(T0, "BLE", self.A1, raw=odd), log_row(T0 + MIN, "BLE", self.A2, raw=odd),
+                       log_row(T0 + MIN, "BLE", self.A3, raw=odd2)])
+        self.assertEqual(d[self.A1]["ident_id"], "google-fef3")
+        self.assertEqual((d[self.A1]["group_size"], d[self.A3]["group_size"]), (2, 1))
+
+    def test_same_name_joins_changing_addresses_only(self):
+        """Earbuds change address and keep their name: one device. Twenty rental scooters that are
+        all named the same have twenty fixed addresses: twenty devices."""
+        rows = [log_row(T0 + i * MIN, "BLE", m, "Buds of a test", uuids=self.UUID) for i, m in enumerate((self.A1, self.A2))]
+        rows += [log_row(T0 + i * MIN, "BLE", m, "Scooter1", uuids=self.UUID.replace("A1B2", "B2C3")) for i, m in enumerate((self.S1, self.S2))]
+        d = self.load(rows)
+        self.assertEqual((d[self.A1]["group_size"], d[self.A2]["group_size"]), (2, 2))
+        self.assertEqual((d[self.S1]["group_size"], d[self.S2]["group_size"]), (1, 1))
+        self.assertEqual(d[self.S1]["group"], "")
+
+
+# ── travelled with the phone ────────────────────────────────────────────────────────────────────
+class Travel(TempStore):
+    """25 minutes of a made-up day: 10 min at A, 5 min of driving 3.3 km north, 10 min at B."""
+    X, Y, Z = "4A:00:00:00:00:0A", "4A:00:00:00:00:0B", "4A:00:00:00:00:0C"
+    FA, FB = "02:00:00:00:0A:01", "02:00:00:00:0B:01"
+
+    @staticmethod
+    def where(sec):
+        frac = min(max((sec - 600) / 300, 0), 1)
+        return f"{60.0 + 0.03 * frac:.6f}", "25.000000"
+
+    def day(self):
+        rows = []
+        for sec in range(0, 1501, 30):
+            lat, lon = self.where(sec)
+            rows.append(log_row(T0 + sec * 1000, "BLE", self.X, "", -50, lat=lat, lon=lon))      # always there
+            if sec <= 600:
+                rows.append(log_row(T0 + sec * 1000, "WIFI", self.FA, "Net-A", -60, lat=lat, lon=lon))
+            if sec >= 900:
+                rows.append(log_row(T0 + sec * 1000, "WIFI", self.FB, "Net-B", -60, lat=lat, lon=lon))
+            if 660 <= sec <= 840:                                                              # 3 min, 2 km
+                rows.append(log_row(T0 + sec * 1000, "BLE", self.Y, "", -90, lat=lat, lon=lon))
+        for sec in (720, 775):                                                                # 55 s, 600 m
+            lat, lon = self.where(sec)
+            rows.append(log_row(T0 + sec * 1000, "BLE", self.Z, "", -95, lat=lat, lon=lon))
+        return rows
+
+    def test_stops_of_a_track(self):
+        pts = []
+        for sec in range(0, 2101, 10):                       # A, drive, B, and back to A at a jump
+            lat, lon = self.where(sec) if sec <= 1500 else ("60.000100", "25.000100")
+            pts.append((T0 + sec * 1000, float(lat), float(lon)))
+        stops = H.find_stops(pts)
+        self.assertEqual([s["place"] for s in stops], [1, 2, 1])
+        self.assertAlmostEqual((stops[0]["to"] - stops[0]["from"]) / MIN, 10, delta=1.5)
+        self.assertAlmostEqual(stops[1]["lat"], 60.03, places=3)
+        self.assertEqual(H.find_stops([]), [])
+        self.assertEqual(H.find_stops(pts[60:90]), [])        # five minutes of driving: no stop
+
+    def test_levels(self):
+        H.import_bytes("log.csv", log_csv(self.day()), None, 0, None)
+        d = {x["mac"]: x for x in self.devices()}
+        x = d[self.X]
+        self.assertEqual((x["travel"], x["travel_stops"], x["travelled"]), ("stops", 2, True))
+        self.assertAlmostEqual(x["travel_km"], 3.3, delta=0.1)
+        self.assertEqual(len(x["travel_at"]), 2)
+        y = d[self.Y]
+        self.assertEqual((y["travel"], y["travel_stops"]), ("road", 0))
+        self.assertAlmostEqual(y["travel_km"], 2.0, delta=0.1)
+        self.assertEqual(y["travel_min"], 3)
+        z = d[self.Z]                       # 600 m in under a minute: the old rule marked this
+        self.assertGreaterEqual(z["spread_m"], 500)
+        self.assertEqual((z["travel"], z["travelled"]), ("", False))
+        for fixed in (self.FA, self.FB):
+            self.assertEqual(d[fixed]["travel"], "")
+
+    def test_a_linked_device_is_judged_as_one(self):
+        """At stop A it used one address, at stop B another: together they were at both."""
+        a1, a2, adv = "4A:00:00:00:00:21", "5B:00:00:00:00:22", fcf1("33" * 20)
+        rows = self.day()
+        la, lo = self.where(300)
+        lb, lob = self.where(1200)
+        rows += [log_row(T0 + 300 * 1000, "BLE", a1, raw=adv, lat=la, lon=lo),
+                 log_row(T0 + 1200 * 1000, "BLE", a2, raw=adv, lat=lb, lon=lob)]
+        H.import_bytes("log.csv", log_csv(rows), None, 0, None)
+        d = {x["mac"]: x for x in self.devices()}
+        self.assertEqual((d[a1]["group_size"], d[a1]["travel"], d[a2]["travel"]), (2, "stops", "stops"))
+        self.assertEqual(d[a1]["spread_m"], 0)                          # the address alone did not move
+        self.assertGreater(d[a1]["group_spread_m"], 3000)               # the device did
+
+    def test_sit_rows_alone_give_no_travel(self):
+        sit = ("kind,mac,name,first_seen,last_seen,hits,rssi_max,rssi_min,signatures,lat,lon\n"
+               "BLE,4A:00:00:00:00:31,,2026-11-09T08:00:00.000Z,2026-11-09T09:00:00.000Z,40,-50,-90,,60.0,25.0\n")
+        H.import_bytes("fieldwatch-sit-test.csv", sit.encode(), None, 0, None)
+        d = self.devices()[0]
+        self.assertEqual((d["travel"], d["travelled"], d["travel_at"]), ("", False, []))
+
+    def test_api_and_export(self):
+        H.import_bytes("log.csv", log_csv(self.day()), None, 0, None)
+        c = H.app.test_client()
+        j = c.get("/api/devices").get_json()
+        self.assertEqual([s["place"] for s in j["stops"]], [1, 2])
+        import csv
+        out = {r["mac"]: r for r in csv.DictReader(io.StringIO(c.get("/api/export.csv").get_data(as_text=True)))}
+        self.assertEqual((out[self.X]["travel"], out[self.X]["travel_stops"]), ("stops", "2"))
+        self.assertEqual(out[self.Y]["travel"], "road")
+        self.assertEqual(out[self.Z]["travel"], "")
 
 
 # ── the web side ────────────────────────────────────────────────────────────────────────────────

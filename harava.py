@@ -541,6 +541,15 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return 2 * r * math.asin(min(1.0, math.sqrt(a)))
 
 
+def rotating_address(mac):
+    """A Bluetooth resolvable private address (top two bits 01): the kind a phone, a watch or earbuds
+    change every few minutes. Static and public addresses stay with their device."""
+    try:
+        return int(mac[:2], 16) >> 6 == 1
+    except (TypeError, ValueError):
+        return False
+
+
 def freq_band(freq, kind):
     if kind != "WIFI" or not freq:
         return ""
@@ -1623,10 +1632,124 @@ def query_hears(con, t_from=None, t_to=None, kind=None, mac=None, no_sit=False, 
     return [dict(r) for r in con.execute(sql, args)]
 
 
-def build_devices(hears):
+# ── did a radio travel with the phone? ──
+# The phone's own track (the positions on the log rows) is cut into stops and movement. A radio heard
+# at two stops far apart was with the phone at both: the strong sign. A radio heard for minutes while
+# the phone moved shared the road: expected in traffic. Anything shorter was only passed.
+STOP_RADIUS_M = 150          # the phone stayed within this distance of where the stop began ...
+STOP_MIN_S = 300             # ... for at least this long
+PLACE_JOIN_M = 250           # two stops this close are the same place (home in the morning and at noon)
+ROAD_MIN_S = 120             # "same road": heard over at least this long while moving ...
+ROAD_FACTOR = 2              # ... and over at least this many times travel_min_m
+
+
+def find_stops(points):
+    """points: [(ts, lat, lon)] of one phone, sorted by time. Returns the stops as dicts
+    {from, to, lat, lon, place}; stops at the same place share the place number (from 1)."""
+    pts, last = [], None
+    for p in points:                              # one point per 10 s is plenty
+        if last is None or p[0] - last >= 10000:
+            pts.append(p)
+            last = p[0]
+    stops, i, n = [], 0, len(pts)
+    while i < n:
+        j = i + 1
+        while j < n and haversine_m(pts[i][1], pts[i][2], pts[j][1], pts[j][2]) <= STOP_RADIUS_M:
+            j += 1
+        if pts[j - 1][0] - pts[i][0] >= STOP_MIN_S * 1000:
+            seg = pts[i:j]
+            stops.append({"from": seg[0][0], "to": seg[-1][0],
+                          "lat": statistics.median(q[1] for q in seg), "lon": statistics.median(q[2] for q in seg)})
+            i = j
+        else:
+            i += 1
+    places = []                                   # [(lat, lon)], a stop joins the first place close enough
+    for st in stops:
+        for k, (la, lo) in enumerate(places):
+            if haversine_m(la, lo, st["lat"], st["lon"]) <= PLACE_JOIN_M:
+                st["place"] = k + 1
+                break
+        else:
+            places.append((st["lat"], st["lon"]))
+            st["place"] = len(places)
+    return stops
+
+
+def phone_stops(hears):
+    """The stops of every phone in these hears: {collector_id: {"stops": [...], "starts": [...]}}.
+    Sit rows carry one position for a whole sitting, so only rows with a time and a place of their
+    own count."""
+    tracks = defaultdict(list)
+    for h in hears:
+        if h["src"] != "sit" and h["ts"] and h["lat"] is not None and h["lon"] is not None:
+            tracks[h.get("collector_id")].append((h["ts"], h["lat"], h["lon"]))
+    out = {}
+    for c, t in tracks.items():
+        sts = find_stops(sorted(t))
+        out[c] = {"stops": sts, "starts": [s["from"] for s in sts]}
+    return out
+
+
+def travel_of(hs, stops):
+    """How these hears (one device: one address, or all the addresses of a linked device) travelled
+    with the phone. Returns None, or {level, stops, at, km, min}:
+    level "stops" = heard at two stops at least travel_min_m apart; "road" = heard for ROAD_MIN_S
+    while the phone moved ROAD_FACTOR x travel_min_m, or at a stop and again that far from it."""
+    far = CFG["travel_min_m"]
+    at, moving = {}, defaultdict(list)            # place -> stop; (phone, run number) -> hears on the move
+    for h in hs:
+        if h["src"] == "sit" or not h["ts"]:
+            continue
+        ph = stops.get(h.get("collector_id")) or {"stops": [], "starts": []}
+        sts = ph["stops"]
+        k = bisect.bisect_right(ph["starts"], h["ts"]) - 1
+        if k >= 0 and h["ts"] <= sts[k]["to"]:
+            # (a stop is a stretch of time, so a row without a GPS fix still tells at which stop it was heard)
+            at.setdefault((h.get("collector_id"), sts[k]["place"]), []).append((sts[k], h))
+        elif h["lat"] is not None and h["lon"] is not None:
+            moving[(h.get("collector_id"), k)].append(h)   # k = the stop before this stretch of road
+    if not at and not moving:
+        return None
+    visits = []                                   # when: the stops where it was heard, one entry per stay
+    for fr, to, pl in sorted({(st["from"], st["to"], st["place"]) for v in at.values() for st, _h in v}):
+        if visits and visits[-1][2] == pl and fr - visits[-1][1] <= 600000:
+            visits[-1][1] = to
+        else:
+            visits.append([fr, to, pl])
+    cents = [(v[0][0]["lat"], v[0][0]["lon"]) for v in at.values()]
+    apart = max((haversine_m(a[0], a[1], b[0], b[1]) for i, a in enumerate(cents) for b in cents[i + 1:]), default=0)
+    if len(cents) >= 2 and apart >= far:
+        first = min(h["ts"] for v in at.values() for _s, h in v)
+        last = max(h["ts"] for v in at.values() for _s, h in v)
+        return {"level": "stops", "stops": len(cents), "at": visits[:8], "km": round(apart / 1000, 1),
+                "min": round((last - first) / 60000)}
+    best = None
+    for run in moving.values():
+        lats, lons, ts = [h["lat"] for h in run], [h["lon"] for h in run], [h["ts"] for h in run]
+        spread = haversine_m(min(lats), min(lons), max(lats), max(lons))
+        dur = (max(ts) - min(ts)) / 1000
+        if spread >= ROAD_FACTOR * far and dur >= ROAD_MIN_S and (best is None or spread > best[0]):
+            best = (spread, dur)
+    if best is None and cents:                    # at a stop, and heard again far from it on the way
+        away = [(min(haversine_m(c[0], c[1], h["lat"], h["lon"]) for c in cents), h["ts"])
+                for run in moving.values() for h in run]
+        away = [(d, t) for d, t in away if d >= ROAD_FACTOR * far]
+        # (twice, half a minute apart: one row with a wrong GPS fix must not send a neighbour travelling)
+        if len(away) >= 2 and max(t for _d, t in away) - min(t for _d, t in away) >= 30000:
+            ts = [t for _d, t in away] + [h["ts"] for v in at.values() for _s, h in v]
+            best = (max(d for d, _t in away), (max(ts) - min(ts)) / 1000)
+    if best:
+        return {"level": "road", "stops": len(cents), "at": visits[:8], "km": round(best[0] / 1000, 1),
+                "min": round(best[1] / 60)}
+    return None
+
+
+def build_devices(hears, stops=None):
     groups = defaultdict(list)
     for h in hears:
         groups[(h["kind"], h["mac"])].append(h)
+    if stops is None:
+        stops = phone_stops(hears)
     out = []
     for (kind, mac), hs in groups.items():
         names = Counter(h["name"] for h in hs if h["name"])
@@ -1711,7 +1834,6 @@ def build_devices(hears):
             "raw": raw,
             "lat": loud["lat"] if loud else None, "lon": loud["lon"] if loud else None,
             "spread_m": round(spread), "places": len(cells),
-            "travelled": bool(spread >= CFG["travel_min_m"] and len(cells) >= 2),
             "tracker_mode": tmode, "sensor": sensor,
             "reclass": reclass,                       # the layer Fieldwatch's signature gave, when Harava moved it
             "phones": len({h.get("collector_id") for h in hs}),
@@ -1725,8 +1847,10 @@ def build_devices(hears):
         names = Counter(x["name"] for x in ds if x["name"])
         if g.startswith("uuid128:"):
             # a shared custom service UUID alone is not proof: many devices of one maker use the same one
-            # (Ruuvi tags, Windows PCs, Galaxy Buds). Only addresses that also tell the same name are joined.
-            named = [x for x in ds if x["name"]] if len(names) == 1 else []
+            # (Ruuvi tags, Windows PCs, Galaxy Buds). Only addresses that also tell the same name are joined,
+            # and only addresses of the kind that changes: twenty rental scooters all named "Scooter1"
+            # have twenty fixed addresses and are twenty scooters.
+            named = [x for x in ds if x["name"] and rotating_address(x["mac"])] if len(names) == 1 else []
             for x in ds:
                 if x not in named:
                     x["group"] = ""
@@ -1739,9 +1863,26 @@ def build_devices(hears):
         for x in ds:
             x["group_size"] = len(ds)
             x["group_name"] = gname
+    # travel: one answer per device, so the addresses of a linked device are judged together
+    linked = defaultdict(list)
     for d in out:
         d.setdefault("group_size", 1)
         d.setdefault("group_name", "")
+        linked[d["group"] if d["group_size"] > 1 else (d["kind"], d["mac"])].append(d)
+    for ds in linked.values():
+        hs = [h for d in ds for h in groups[(d["kind"], d["mac"])]]
+        tv = travel_of(hs, stops) or {}
+        gspread = 0
+        if len(ds) > 1:
+            loc = [(h["lat"], h["lon"]) for h in hs if h["lat"] is not None and h["lon"] is not None]
+            if loc:
+                gspread = round(haversine_m(min(p[0] for p in loc), min(p[1] for p in loc),
+                                            max(p[0] for p in loc), max(p[1] for p in loc)))
+        for d in ds:
+            d.update({"travel": tv.get("level", ""), "travelled": bool(tv), "travel_stops": tv.get("stops", 0),
+                      "travel_km": tv.get("km", 0), "travel_min": tv.get("min", 0), "travel_at": tv.get("at", []),
+                      "group_spread_m": gspread or d["spread_m"]})
+    for d in out:
         # a nameless address of a named group: identify it again with the group's name
         # (the Mesh beacons of a "Charge" device carry no name, its other adverts do)
         if not d["name"] and d["group_name"] and d["group_size"] > 1 and d["kind"] == "BLE":
@@ -2378,7 +2519,9 @@ def api_devices():
     no_sit = request.args.get("nosit") == "1"     # the phone check works from the log only
     with db() as con:
         hears = query_hears(con, t_from, t_to, no_sit=no_sit)
-    return jsonify({"devices": build_devices(hears), "hears": len(hears)})
+    stops = phone_stops(hears)
+    return jsonify({"devices": build_devices(hears, stops), "hears": len(hears),
+                    "stops": [dict(st, phone=c) for c, ph in stops.items() for st in ph["stops"]]})
 
 
 @app.route("/api/path")
@@ -2553,6 +2696,7 @@ def api_export():
         devs = [d for d in devs if f"{d['kind']}|{d['mac']}" in macs]
     cols = ["kind", "mac", "name", "vendor", "category", "class", "fleets", "hears", "log_rows", "sit_hits", "first", "last",
             "rssi_max", "rssi_med", "channel", "freq", "band", "flags", "spread_m", "places", "travelled",
+            "travel", "travel_stops", "travel_km", "travel_min", "group", "group_size",
             "tracker_mode", "lat", "lon", "mfg", "uuids", "raw"]
     buf = io.StringIO()
     w = csv.writer(buf)

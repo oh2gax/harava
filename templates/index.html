@@ -72,10 +72,10 @@
         </div>
         <div class="range-row">Min RSSI <input type="range" id="minRssi" min="-105" max="-30" step="1" value="-105" oninput="setMinRssi(this.value)"><b id="minRssiVal">any</b></div>
         <div style="margin-top:10px">
-            <label class="sw-row">Travelled with me <span class="switch"><input type="checkbox" id="fTravel" onchange="setFlag('travel',this.checked)"><span></span></span></label>
+            <label class="sw-row" title="Heard at two of your stops at least {{ travel_min_m }} m apart (at N stops), or for minutes while you moved (same road)">Travelled with me <span class="switch"><input type="checkbox" id="fTravel" onchange="setFlag('travel',this.checked)"><span></span></span></label>
             <label class="sw-row">Named or identified only <span class="switch"><input type="checkbox" id="fIdent" onchange="setFlag('ident',this.checked)"><span></span></span></label>
             <label class="sw-row" title="Radios that only a Sit export has: the log missed them">Heard only in Sit <span class="switch"><input type="checkbox" id="fSitOnly" onchange="setFlag('sitOnly',this.checked)"><span></span></span></label>
-            <label class="sw-row" title="Show the changing addresses of one device (same Mesh UUID, same custom service …) as one row and one pin">Group same device <span class="switch"><input type="checkbox" id="fGroup" checked onchange="setGroupSame(this.checked)"><span></span></span></label>
+            <label class="sw-row" title="Show the changing addresses of one device (same Mesh UUID, same Google advertisement or day code, same custom service and name) as one row and one pin">Group same device <span class="switch"><input type="checkbox" id="fGroup" checked onchange="setGroupSame(this.checked)"><span></span></span></label>
             <label class="sw-row">Hide my devices <small id="ownCnt"></small><span class="switch"><input type="checkbox" id="fHideOwn" checked onchange="setHideOwn(this.checked)"><span></span></span></label>
         </div>
     </div>

@@ -6,6 +6,55 @@ are in `doc/whats_new.md` (shown under *✨ What's new* in the app).
 
 ---
 
+## [2026-11-12]
+
+From the data check of an 11 Nov drive (23 km): "travelled with you" marked 57 addresses, of which
+38 were one watch and the rest other traffic.
+
+### Added
+- **Stops.** `find_stops()` cuts a phone's track (the positions on rows that have a time and place
+  of their own: log and KML rows, not Sit rows) into stops: the phone stayed within
+  `STOP_RADIUS_M` (150 m) of where the stop began for at least `STOP_MIN_S` (300 s). Stops within
+  `PLACE_JOIN_M` (250 m) are the same place. `phone_stops()` does it per phone; `/api/devices`
+  returns them as `stops`.
+- **Travel levels.** `travel_of()` judges a device against the stops: `stops` = heard at two stops
+  at least `travel_min_m` apart; `road` = heard over `ROAD_MIN_S` (120 s) and `ROAD_FACTOR` × 
+  `travel_min_m` within one stretch of movement, or at a stop and again (twice, 30 s apart) that
+  far from it. A row without a GPS fix counts at the stop its time falls in. New device fields
+  `travel`, `travel_stops`, `travel_km`, `travel_min`, `travel_at` ([from, to, place] of the stops
+  where it was heard) and `group_spread_m`; `travelled` stays as `bool(travel)`. Before:
+  `spread ≥ travel_min_m` and two cells, per address.
+- **Travel is decided per linked device**: the hears of all addresses of a group are judged
+  together and every address gets the result.
+- **Android addresses linked.** Rules `google-fcf1` and `google-fef3` get a `group` on their whole
+  service data (the same advertisement under several addresses; in the data 164 and 106 such
+  advertisements, never two addresses at once). New rule `google-fef3-day` for the form
+  `4A 17 23` + four characters + `11`: grouped by the four characters (key `google-day-code`), which
+  behave like a code of one device lasting about a day (270 codes in four days; the only addresses
+  that overlap in time start together and differ by 2.5 dB in the median: two parallel streams of
+  one device). Identification database `2026-11-12.1`, 50 rules.
+- Pages: tags *at N stops* (amber) and *same road* (grey) in place of *travelled*; a *Travelled*
+  row in the radio panels with the stops' times; the *Travelled* count shows devices at stops plus
+  the same-road ones; `travelTag()`, `travelText()`, `travelWhen()` and `carryAcross()` in
+  `common.js` (a radio's own page is built from one address, so the group and the travel come from
+  the list); group labels for the new keys. CSV exports: `travel`, `travel_stops`, `travel_km`,
+  `travel_min` (and `group`, `group_size` in the server's export).
+- Tests: 11 more (`Linking`, `Travel`, the form of every rule's `group`), 66 in all.
+
+### Fixed
+- **Different devices were joined by name.** Addresses sharing a custom service UUID and a name
+  were one device, which joined twenty rental scooters named "Scooter1" (and made them travel
+  12 km) and seven "Seos" door readers. Only resolvable private addresses (`rotating_address()`,
+  top two bits 01) are joined now; static and public addresses stay apart.
+- With *Group same device* on, a group showed the spread of its loudest address; it now shows the
+  spread of all its addresses.
+
+### Changed
+- User guide 1.6 (Travelled rewritten; one device, many addresses), Mobile guide 1.5, README,
+  `config.ini.example` (what `travel_min_m` now means).
+
+---
+
 ## [2026-11-10]
 
 ### Added

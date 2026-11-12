@@ -46,7 +46,7 @@ It runs on your own computer (open, no sign-in) or on a server behind nginx with
 - **Map** — the phone's path and one pin per radio at the place where it was heard loudest; icon pins for glasses, trackers, surveillance, police, drones and hacking tools; a pulsing ring for a tracker separated from its owner.
 - **Timeline** of hears and new radios per 10 minutes, also for one kind of device (e.g. *Glasses & VR only*).
 - **Device layers** — one per Fieldwatch signature class, grouped as Watch list, Personal, Places & things and Background.
-- **Devices list** with search, filters, sorting and CSV export; tags for radios that **travelled** with you, **separated** trackers, **sit only** radios and Ruuvi temperatures.
+- **Devices list** with search, filters, sorting and CSV export; tags for radios that **travelled** with you (*at N stops*, or only on the *same road*), **separated** trackers, **sit only** radios and Ruuvi temperatures.
 - **Harava's own identification database** — the Bluetooth SIG numbers and its own rules name radios Fieldwatch leaves *Unidentified* (97 % of them in the author's data), and join the changing addresses of one device into one row.
 - **My devices** — hide your own router, PC, phone and sensors from the analysis.
 - **Phone check** — is every phone in the box next to the teacher's phone?
@@ -290,14 +290,14 @@ It shows the new commits and changed files and asks `Update to <hash>? [y/N]`. A
 | Page | What it does |
 |------|--------------|
 | **Map** | The phone's path and one pin per radio, at the place it was heard loudest. Filled pins are Bluetooth and rings are Wi-Fi; bigger means louder, and the colour shows the layer. Click a pin for the radio's details, its RSSI over time and every place it was heard. The timeline at the top shows hears and new radios per 10 min; click a bar to zoom in. Its **Show** selector limits the graph to one kind of device. |
-| **Devices** | Sortable table of all radios with filters and CSV export. Tags mark *travelled*, *separated* trackers, *sit only*, *N addr.* (one device, many addresses) and Ruuvi temperatures. **＋** marks a radio as one of *My devices*. |
+| **Devices** | Sortable table of all radios with filters and CSV export. Tags mark *at N stops* and *same road* (travelled), *separated* trackers, *sit only*, *N addr.* (one device, many addresses) and Ruuvi temperatures. **＋** marks a radio as one of *My devices*. |
 | **Phone check** | The classroom phone-box check (below). |
 | **🔎 Identification** | How much Harava's own database identifies, which rules matched, and the most common advertisements that are still unknown. |
 | **Imports** | Drop files or a .zip (or **Scan folder**: every new `.csv` / `.jsonl` / `.kml` in `data/`, oldest first). Each file shows its owner and phone, what it brought, what it covers and whom it is shared with; switch it off, share, re-read or delete it. Coverage bars over time. |
 | **🔬 Workbench** | Radios Harava cannot name yet, a status and note for each kind, and rules made on the spot (admins only; `/workbench`). |
 | **⚙️ Maintenance** | Users, permissions and the sign-in log (admins only; a separate page at `/maintenance`). |
 
-Sidebar: *Whose data* (your own, shared with you, one user's, or everyone's for admins); day, *Until* (a range of days) and time window; filters: Wi-Fi or Bluetooth; minimum RSSI; *Identified as* (one kind of identified device, grouped by layer); *Travelled with me* (the same address ≥ 500 m apart, in two or more places); *Named or identified only*; *Heard only in Sit*; *Group same device*; *Hide my devices*.
+Sidebar: *Whose data* (your own, shared with you, one user's, or everyone's for admins); day, *Until* (a range of days) and time window; filters: Wi-Fi or Bluetooth; minimum RSSI; *Identified as* (one kind of identified device, grouped by layer); *Travelled with me* (at two of your stops ≥ 500 m apart, or beside you for minutes while you moved); *Named or identified only*; *Heard only in Sit*; *Group same device*; *Hide my devices*.
 
 ### Device layers
 
@@ -367,7 +367,7 @@ Fieldwatch's signatures name only part of what it hears; in the author's log of 
 It recognises among others: Bluetooth Mesh devices (not set up / set up), EV charging points that advertise as Mesh devices named *Charge*, Philips Hue and other Signify lighting, LE Audio, heart-rate sensors, Apple Continuity messages (AirPods, iPhone / iPad / Mac, Handoff, AirPlay, AirDrop, HomeKit …), Samsung Galaxy devices, Windows PCs, Google services, Oral-B toothbrushes, OnePlus, EcoFlow, Ruuvi, TVs, audio devices and wearables.
 
 - **Identified as** and **Company / vendor** are columns on the Devices page and rows in the Selected radio panel; a grey name with **?** is a weak guess. A radio Fieldwatch left *Unidentified* moves to the layer the rule gives.
-- **Group same device.** Many devices change their Bluetooth address every few minutes. When the data proves that addresses belong to one device — the same Bluetooth Mesh device UUID, or the same custom service UUID *and* the same name — Harava joins them; with *Group same device* on, a group is one row with an **N addr.** tag. A shared custom UUID alone is not proof (Ruuvi tags, Windows PCs and Galaxy Buds each share one).
+- **Group same device.** Many devices change their Bluetooth address every few minutes. When the data proves that addresses belong to one device — the same Bluetooth Mesh device UUID, the same Google advertisement or day code of an Android phone or watch, or the same custom service UUID *and* the same name on addresses of the changing kind — Harava joins them; with *Group same device* on, a group is one row with an **N addr.** tag. A shared custom UUID alone is not proof (Ruuvi tags, Windows PCs and Galaxy Buds each share one).
 - The **🔎 Identification** page lists every rule with its hits and the most common unknown advertisements — the place to look for the next rule. Edit `ids/harava_ids.json` and press **Reload database** (Analyze permission); no restart is needed.
 
 ## Workbench (admins)
@@ -428,7 +428,7 @@ Keep the window short (phones change their address about every 15 minutes), use 
 | `database` | `harava.db` | SQLite file of the radio data (relative to the program folder) |
 | `watch_folder` | `data` | folder that *Scan folder* reads, sub-folders included |
 | `open_browser` | `true` | open the browser at start (`false` on a server) |
-| `travel_min_m` | `500` | a radio heard this far apart, in two or more places, *travelled with me* |
+| `travel_min_m` | `500` | a radio heard at two of your stops at least this far apart was *at N stops* with you; twice this distance, over two minutes of movement, is *same road* |
 | `require_login` | `false` | `true`: refuse to start without users (use it on a server) |
 | `behind_proxy` | `false` | `true` behind nginx with HTTPS: trust `X-Forwarded-*`, HTTPS-only cookies |
 | `session_days` | `30` | how long *Keep me signed in* lasts |

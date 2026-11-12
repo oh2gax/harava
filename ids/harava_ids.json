@@ -1,6 +1,6 @@
 {
   "name": "Harava identification database",
-  "version": "2026-11-10.2",
+  "version": "2026-11-12.1",
   "description": "Harava's own rules for radios that Fieldwatch's signatures leave unidentified. Rules are tried in order; the first that matches wins. A rule only changes the layer of a radio that Fieldwatch did not identify; for the others it adds the 'Identified as' text. Company names come from bt_assigned_numbers.json (Bluetooth SIG).",
   "schema": {
     "match (all given conditions must hold)": {
@@ -606,6 +606,26 @@
       }
     },
     {
+      "id": "google-fef3-day",
+      "name": "Google / Android device (service FEF3)",
+      "layer": "Android / Google",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "service_data_uuid": "FEF3",
+        "service_data_regex": "^4A1723(3[0-9]|4[1-9A-F]|5[0-9A]){4}11"
+      },
+      "group": {
+        "source": "service_data",
+        "uuid": "FEF3",
+        "from": 3,
+        "to": 7,
+        "key": "google-day-code",
+        "label": "Google day code"
+      },
+      "note": "Service data with Google's member UUID FEF3, in the form 4A 17 23 + four characters + 11. Google does not document it; most such advertisers are Android phones, watches and Google devices. In the data Harava was built on, the four characters behave like a code of one device that lasts about a day: the address changes every few minutes and the rest of the advertisement changes too, but the code stays, and no two advertisements with one code were ever heard at the same moment. Harava therefore shows the addresses with one code as one device. This is an observation, not a published fact."
+    },
+    {
       "id": "google-fef3",
       "name": "Google / Android device (service FEF3)",
       "layer": "Android / Google",
@@ -614,7 +634,13 @@
         "kind": "BLE",
         "service_data_uuid": "FEF3"
       },
-      "note": "Service data with Google's member UUID FEF3. Google does not document it; most such advertisers are Android phones and Google devices nearby, rotating their address."
+      "note": "Service data with Google's member UUID FEF3. Google does not document it; most such advertisers are Android phones and Google devices nearby, changing their address every few minutes. The advertisement itself stays the same over several address changes, so Harava shows the addresses that send the same one as one device.",
+      "group": {
+        "source": "service_data",
+        "uuid": "FEF3",
+        "key": "google-fef3",
+        "label": "Same advertisement"
+      }
     },
     {
       "id": "google-fcf1",
@@ -625,7 +651,13 @@
         "kind": "BLE",
         "service_data_uuid": "FCF1"
       },
-      "note": "Service data with Google's member UUID FCF1 (registered 2022). Not documented; seen from Android devices."
+      "note": "Service data with Google's member UUID FCF1 (registered 2022). Not documented; seen from Android phones and watches. The address changes about every nine minutes, but the advertisement often stays the same over several changes (from minutes to hours), so Harava shows the addresses that send the same one as one device. One device can send two such advertisements at a time; they then appear as two devices that change address at the same moment.",
+      "group": {
+        "source": "service_data",
+        "uuid": "FCF1",
+        "key": "google-fcf1",
+        "label": "Same advertisement"
+      }
     },
     {
       "id": "google-fe9f",

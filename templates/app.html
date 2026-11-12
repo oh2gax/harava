@@ -83,7 +83,7 @@
         <div><span>Identified</span><b id="m-d-ident" class="grn">—</b></div>
         <div><span>Trackers</span><b id="m-d-trk">—</b><small id="m-d-sep"></small></div>
         <div><span>Glasses &amp; VR</span><b id="m-d-gl">—</b></div>
-        <div><span>Travelled</span><b id="m-d-trav">—</b></div>
+        <div><span>Travelled</span><b id="m-d-trav">—</b><small id="m-d-road"></small></div>
       </div>
     </div>
     <div class="m-card">
@@ -243,7 +243,7 @@
       <label class="app-switch"><span>Named or identified</span><input type="checkbox" id="m-f-named"></label>
       <label class="app-switch"><span>Heard only in Sit</span><input type="checkbox" id="m-f-sit"></label>
     </div>
-    <div class="app-small">The filter applies to the Map, the Day counts, the Watch list and Devices. <i>Group same device</i>: the changing addresses of one device (the same Bluetooth Mesh number, or the same custom service and name) as one radio. <i>Hide my devices</i>: the radios of My devices (＋ My device on a radio's page, or on the full site). <i>Travelled with me</i>: heard at least {{ travel_min_m }} m apart, in two or more places. Remembered on the phone.</div>
+    <div class="app-small">The filter applies to the Map, the Day counts, the Watch list and Devices. <i>Group same device</i>: the changing addresses of one device (the same Bluetooth Mesh number, the same Google advertisement or day code of an Android device, or the same custom service and name) as one radio. <i>Hide my devices</i>: the radios of My devices (＋ My device on a radio's page, or on the full site). <i>Travelled with me</i>: heard at two of your stops at least {{ travel_min_m }} m apart (<i>at N stops</i>), or for minutes while you moved (<i>same road</i>). Remembered on the phone.</div>
   </details>
   <details class="app-sec" data-for="map">
     <summary>Map options</summary>
@@ -264,7 +264,7 @@
     <summary>Devices options</summary>
     <div class="app-field"><span>Sort by</span>
       <select id="m-o-sort" data-chips><option value="rssi">Strongest</option><option value="hears">Most hears</option><option value="last">Latest</option><option value="name">Name</option><option value="cat">Layer</option></select></div>
-    <div class="app-small">Search matches the name, address, maker, signature, layer, <i>Identified as</i> and company. Tags: <i>N addr.</i> one device with many addresses, <i>travelled</i>, <i>separated</i> tracker, <i>sit only</i>, <i>★</i> my device. Tap a radio for its details.</div>
+    <div class="app-small">Search matches the name, address, maker, signature, layer, <i>Identified as</i> and company. Tags: <i>N addr.</i> one device with many addresses, <i>at N stops</i> with you at that many stops, <i>same road</i> alongside you for minutes, <i>separated</i> tracker, <i>sit only</i>, <i>★</i> my device. Tap a radio for its details.</div>
   </details>
   <details class="app-sec" data-for="phone">
     <summary>Phone check options</summary>

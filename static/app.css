@@ -145,6 +145,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent-dim); }
 .mini-card b.grn { color: var(--green); }
 .mini-card b.red { color: var(--red); }
 .mini-card b.amb { color: var(--amber); }
+.mini-card b small { font-size: 11px; font-weight: 500; color: var(--text-secondary); }
 .sb-foot { padding: 10px 16px; font-size: 10.5px; color: var(--text-muted); margin-top: auto; }
 
 /* ── Main ── */

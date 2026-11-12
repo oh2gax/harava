@@ -9,7 +9,8 @@ database = harava.db
 watch_folder = data
 ; Open the browser when the app starts
 open_browser = true
-; A radio heard at least this far apart (metres), in two or more places, is "travelled with me"
+; A radio heard at two of your stops at least this far apart (metres) travelled with you ("at N stops").
+; Heard for two minutes while you moved twice this distance, it shared the road ("same road").
 travel_min_m = 500
 
 ; ── Sign-in ──

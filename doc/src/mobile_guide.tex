@@ -54,7 +54,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava Mobile app --- what your phone heard, in your pocket}
-\fancyhead[R]{\small\itshape Mobile app user guide, version 1.4 --- November 2026}
+\fancyhead[R]{\small\itshape Mobile app user guide, version 1.5 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava Mobile app - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -82,7 +82,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.4 \quad$\cdot$\quad 10 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad Mobile app user guide, version 1.5 \quad$\cdot$\quad 12 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava Mobile app}\par\vspace{5pt}
 {\large\bfseries The map, the day, the watch list, every radio, the phone check and uploads ---\\ on your phone, one view at a time}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -179,9 +179,9 @@ A choice made with a row of \emph{chips} (round buttons) or a \emph{switch} take
 \textbf{Radio} --- \ui{All}, \ui{Wi-Fi} or \ui{Bluetooth}.\par\smallskip
 \textbf{Signal at least} --- only radios heard at least this strong at some moment: \ui{Any}, $-90$ to $-60$\,dBm. $-60$\,dBm or more is usually within a few metres.\par\smallskip
 \textbf{Layer} --- one device layer only, for example \emph{Tracker} or \emph{Home \& IoT}; the numbers tell how many the other choices leave.\par\smallskip
-\textbf{Group same device} --- the changing Bluetooth addresses of one device as one radio, when Harava has proof that they belong together. On by default.\par\smallskip
+\textbf{Group same device} --- the changing Bluetooth addresses of one device as one radio, when Harava has proof that they belong together (a Bluetooth Mesh number, the Google advertisement or day code of an Android phone or watch, or the same service and name). On by default.\par\smallskip
 \textbf{Hide my devices} --- leaves out your own devices (\emph{My devices}). On by default.\par\smallskip
-\textbf{Travelled with me} --- only radios heard in two or more places at least 500\,m apart: devices in your car or bag, or someone travelling with you.\par\smallskip
+\textbf{Travelled with me} --- only radios that were at two of your stops at least 500\,m apart (\emph{at N stops}: devices in your car or bag, or someone travelling with you), or beside you for minutes while you moved (\emph{same road}: usually other traffic).\par\smallskip
 \textbf{Named or identified} --- only radios that tell a name, have a Fieldwatch signature or are identified by Harava.\par\smallskip
 \textbf{Heard only in Sit} --- only radios that only a Sit export has (the log missed them).
 \end{minipage}
@@ -218,7 +218,7 @@ The filter applies to the Map, the Day counts, the Watch list (except the layer 
 
 The Day view tells the whole day in numbers (Figure~\ref{fig:day}):
 \begin{itemize}[leftmargin=1.2em]
-\item \textbf{the counts} --- radios, hears, the hours with data, Wi-Fi and Bluetooth, how many Bluetooth radios are \emph{identified} (by Fieldwatch or Harava), trackers (and how many of them were separated from their owner), glasses \& VR, and radios that travelled with you;
+\item \textbf{the counts} --- radios, hears, the hours with data, Wi-Fi and Bluetooth, how many Bluetooth radios are \emph{identified} (by Fieldwatch or Harava), trackers (and how many of them were separated from their owner), glasses \& VR, and the radios that were with you at two or more stops (with the number that only shared the road beside it);
 \item \textbf{Hears per 10 min} --- the bars are hears (Wi-Fi blue, Bluetooth green) and the line is radios heard for the first time that day. A spike of new radios is a new place or a crowd. In the menu, \ui{Day options} $\rightarrow$ \ui{Timeline shows} limits the graph to one layer, for example \emph{Glasses \& VR}: then you see exactly when such a radio was near. \textbf{Amber bands} mark where the phone had paused its Bluetooth scan (Wi-Fi rows but no Bluetooth rows for at least 3 minutes, usually because the screen was off): Bluetooth radios there were not heard. \ui{▨ Bluetooth paused} under the graph gives the total; tap a bar for the times;
 \item \textbf{Device layers} --- how many radios of each layer; \emph{tap a layer} to list its radios in Devices;
 \item \textbf{Identified as} --- the ten most common identifications; \emph{tap one} to list those radios in Devices.
@@ -245,7 +245,7 @@ Tap a row for the radio's page.
 
 \lead{Devices} (Figure~\ref{fig:dev}, left) lists every radio the filter leaves, 150 at a time (\ui{Show more} at the end). The box at the top searches the name, address, maker, signature, layer, \emph{Identified as} and company --- for example \texttt{hue}, \texttt{tracker} or the start of an address. \ui{Devices options} $\rightarrow$ \ui{Sort by}: \ui{Strongest}, \ui{Most hears}, \ui{Latest}, \ui{Name} or \ui{Layer}.
 
-\lead{Tags} on a row: \textbf{★} one of My devices; \textbf{N addr.} one device with many addresses; \textbf{separated} tracker; \textbf{travelled}; \textbf{VR?}; \textbf{sit only}; a temperature for Ruuvi sensors.
+\lead{Tags} on a row: \textbf{★} one of My devices; \textbf{N addr.} one device with many addresses; \textbf{separated} tracker; \textbf{at N stops} (it was with you at that many of your stops) or \textbf{same road} (beside you for minutes while you moved); \textbf{VR?}; \textbf{sit only}; a temperature for Ruuvi sensors.
 
 \lead{A radio's page} (Figure~\ref{fig:dev}, middle and right) opens with a tap on a row, a card or a Watch list row. It shows the name and address, its layer and kind, how it was identified (\emph{Identified as}, company, Fieldwatch signatures, maker), how many addresses belong to the same device, the hears, first and last time, strongest and median signal, the places and how far apart they were, the raw advertisement and the days it was heard. Below them:
 \begin{itemize}[leftmargin=1.2em]

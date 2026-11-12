@@ -22,7 +22,7 @@
  * The theme is the full page's setting (fwa_theme_mode), What's new its seen version (harava_seen_version).
  */
 /* global L, Chart, CAT, CAT_COLORS, CAT_ICON, CAT_ORDER, esc, pad, fmtTime, fmtM, ownRuleHits, groupSame,
-          phoneType, phoneBoxLimit, phoneZones, OWN_MATCH_TXT */
+          phoneType, phoneBoxLimit, phoneZones, OWN_MATCH_TXT, travelTag, travelText, travelWhen, carryAcross */
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -361,7 +361,7 @@
     if (d.own) t.push('<span class="tg acc">★</span>');
     if (d._n > 1) t.push(`<span class="tg">${d._n} addr.</span>`);
     if (d.tracker_mode === 'separated') t.push('<span class="tg red">separated</span>');
-    if (d.travelled) t.push('<span class="tg amb">travelled</span>');
+    if (d.travel) t.push(travelTag(d, 'tg'));
     if (d.phones > 1) t.push(`<span class="tg">${d.phones} phones</span>`);
     if (d.vr) t.push('<span class="tg">VR?</span>');
     if (d.in_sit && !d.log_rows) t.push('<span class="tg">sit only</span>');
@@ -469,7 +469,9 @@
     const sep = trk.filter(d => d.tracker_mode === 'separated').length;
     $('m-d-sep').textContent = sep ? `${sep} separated` : '';
     $('m-d-gl').textContent = n0(list.filter(d => d.category === 'Glasses & VR').length);
-    $('m-d-trav').textContent = n0(list.filter(d => d.travelled).length);
+    const onRoad = list.filter(d => d.travel === 'road').length;
+    $('m-d-trav').textContent = n0(list.filter(d => d.travel === 'stops').length);
+    $('m-d-road').textContent = onRoad ? `+${onRoad} same road` : '';
     const ts = list.map(d => d.first).filter(Boolean), te = list.map(d => d.last).filter(Boolean);
     $('m-d-span').textContent = ts.length ? `${fmtTime(Math.min(...ts)).slice(0, 5)}–${fmtTime(Math.max(...te)).slice(0, 5)}` : '—';
     const c = {}; list.forEach(d => { c[d.category] = (c[d.category] || 0) + 1; });
@@ -561,7 +563,7 @@
     $('m-dv-card').innerHTML = '<div class="m-empty">Loading…</div>';
     const r = await api(`/api/device?kind=${encodeURIComponent(kind)}&mac=${encodeURIComponent(mac)}&${rangeQuery()}`);
     const base = S.devices.find(x => x.kind === kind && x.mac === mac);
-    if (r.device && base) { r.device.group_size = base.group_size; r.device.group_name = base.group_name; r.device.group = base.group; r.device.own = base.own; }
+    if (r.device && base) { carryAcross(r.device, base); r.device.own = base.own; }
     S.device = r;
     drawDevice();
   }
@@ -575,7 +577,7 @@
     $('m-dv-card').innerHTML = `
       <div class="m-dev-name">${CAT_ICON[d.category] ? CAT_ICON[d.category] + ' ' : ''}${esc(d.name || (d.kind === 'WIFI' ? '(hidden network)' : '(no name)'))}</div>
       <div class="m-dev-mac">${esc(d.mac)}</div>
-      <div class="m-pills"><span class="m-pill" style="background:${col}">${esc(d.category)}</span><span class="m-pill ghost">${d.kind === 'WIFI' ? 'Wi-Fi ' + esc(d.band || '') : 'Bluetooth LE'}</span>${d.travelled ? `<span class="m-pill" style="background:#d97706">travelled ${fmtM(d.spread_m)}</span>` : ''}${d.tracker_mode ? `<span class="m-pill" style="background:${d.tracker_mode === 'separated' ? '#dc2626' : '#16a34a'}">${esc(d.tracker_mode)}</span>` : ''}</div>
+      <div class="m-pills"><span class="m-pill" style="background:${col}">${esc(d.category)}</span><span class="m-pill ghost">${d.kind === 'WIFI' ? 'Wi-Fi ' + esc(d.band || '') : 'Bluetooth LE'}</span>${d.travel === 'stops' ? `<span class="m-pill" style="background:#d97706">at ${d.travel_stops} stops with you</span>` : d.travel === 'road' ? '<span class="m-pill ghost">same road</span>' : ''}${d.tracker_mode ? `<span class="m-pill" style="background:${d.tracker_mode === 'separated' ? '#dc2626' : '#16a34a'}">${esc(d.tracker_mode)}</span>` : ''}</div>
       <div class="m-kv">
         ${d.ident ? `<span>Identified as</span><b class="id-${d.ident_conf === 'low' ? 'low' : 'high'}">${esc(d.ident)}${conf}</b>` : ''}
         ${d.company ? `<span>Company</span><b>${esc(d.company)}</b>` : ''}
@@ -588,6 +590,7 @@
         <span>RSSI max / med</span><b>${d.rssi_max ?? '?'} / ${d.rssi_med ?? '?'} dBm</b>
         ${d.kind === 'WIFI' ? `<span>Channel</span><b>${esc(d.channel)} · ${d.freq} MHz</b>` : ''}
         <span>Places</span><b>${d.places} · spread ${fmtM(d.spread_m)}</b>
+        ${d.travel ? `<span>Travelled</span><b>${esc(travelText(d))}${travelWhen(d) ? `<br><small>at your stops ${esc(travelWhen(d))}</small>` : ''}</b>` : ''}
         ${d.mfg ? `<span>Company ID</span><b class="mono">0x${esc(d.mfg)}</b>` : ''}
         ${d.uuids ? `<span>Services</span><b class="mono">${esc(d.uuids.replace(/0000(\w{4})-0000-1000-8000-00805F9B34FB/gi, '$1'))}</b>` : ''}
         ${d.raw ? `<span>Raw</span><b class="mono">${esc(d.raw)}</b>` : ''}
