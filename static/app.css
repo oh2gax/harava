@@ -205,6 +205,9 @@ select:focus, input:focus { outline: none; border-color: var(--accent-dim); }
 .leaflet-tooltip.dev-tip { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
 .leaflet-tooltip.dev-tip::before { display: none; }
 .leaflet-container { font-family: inherit; }
+/* A crosshair on the map and on its dots: Leaflet's hands cover the small ones. One class only, so that
+   Leaflet's own rule for dragging (two classes) still shows the closed hand while the map is moved. */
+.leaflet-grab, .leaflet-interactive { cursor: crosshair; }
 
 /* ── Table views ── */
 .page { position: absolute; inset: 0; overflow: auto; padding: 18px 22px; }
@@ -304,6 +307,7 @@ table.grid tbody tr.mine td { color: var(--text-secondary); }
 .sig-warn { color: var(--amber); margin-top: 4px; }
 .sig-warn b { font-weight: 600; }
 .bt-gap-note { color: var(--amber); cursor: help; white-space: nowrap; }
+.log-hole-note { color: var(--red, #ef4444); cursor: help; white-space: nowrap; }
 #timelinePanel.tl-filtered { border-color: var(--accent-dim); }
 
 /* ── What's new / User guides / About (as in WSPR Logger) ── */

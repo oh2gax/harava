@@ -380,6 +380,30 @@ class Rules(TempStore):
         self.assertEqual(H.classify("", "Mitsubishi Outlander", "BLE")[1], "Vehicle")     # a car
         self.assertIsNone(H.identify("BLE", "Nutella jar", "", "", ""))
 
+    def test_rules_of_12_november(self):
+        for name, want, layer in (("DTCO-1234567", "name-tachograph-vdo", "Vehicle"),
+                                  ("Saphe One+", "name-saphe", "Vehicle"),
+                                  ("SwipBox", "name-swipbox", ""),
+                                  ("Grundfos", "name-grundfos", "Home & IoT"),
+                                  ("PINDORA_0012AB", "name-pindora", "Smart lock"),
+                                  ("IOS-Vlink", "name-obd", "Vehicle"),
+                                  ("FMB1204:1234567_LE", "name-teltonika", "Vehicle"),
+                                  ("Poly VLegend 50", "name-audio", "Audio"),
+                                  ("MOMENTUM 4", "name-audio", "Audio"),
+                                  ("Gear S3 (5653) LE", "name-wearable", "Wearable"),
+                                  ("bDW Driver (Dim)", "name-casambi-bdw", "Home & IoT")):
+            hv = H.identify("BLE", name, "", "", "")
+            self.assertEqual((hv["id"], hv["layer"]), (want, layer), name)
+        # with its data, a Casambi lamp is found by the data (the surer rule), not by its name
+        self.assertEqual(H.identify("BLE", "bDW Driver (Dim)", "3C3", "0AFFC303" + "01" * 8, "")["id"], "casambi")
+
+    def test_an_iphone_that_sends_a_windows_service(self):
+        svc = "3E1D50CD-7E3E-427D-8E1C-B78AA87FE624"
+        pc = H.identify("BLE", "", "", "", svc)
+        self.assertEqual((pc["id"], pc["layer"]), ("windows-3e1d", "Windows PC"))
+        phone = H.identify("BLE", "4", "4C", "1005011C0A0B0C", svc)
+        self.assertEqual((phone["id"], phone["layer"], phone["confidence"]), ("phone-link-iphone", "Apple device", "low"))
+
     def test_ibeacon_is_not_apple(self):
         frame = "0215" + "AB" * 16 + "00010002C5"
         for mfg, raw in (("4C", frame), ("4C", "0201061AFF4C00" + frame)):
@@ -500,6 +524,44 @@ class Store(TempStore):
                                                    "121910" + KEY22 + "0100")]), None, 0, None)
         tag = self.device("02:00:00:00:00:09")
         self.assertEqual((tag["category"], tag["ident_id"], tag["tracker_mode"]), ("Tracker", "findmy-airtag", "separated"))
+
+    SIT_HEAD = "kind,mac,name,first_seen,last_seen,hits,rssi_max,rssi_min,signatures,lat,lon\n"
+
+    def test_a_radio_only_in_a_sit(self):
+        """A Sit export has no advertisement: Harava says so, and does not call a Find My radio a tracker."""
+        sit = self.SIT_HEAD + "".join(f"BLE,{mac},{name},2026-11-09T08:00:00.000Z,2026-11-09T08:00:30.000Z,3,-70,-90,{sig},60.0,25.0\n"
+                                      for mac, name, sig in (("4A:00:00:00:00:61", "", ""),
+                                                             ("4A:00:00:00:00:62", "", "Apple AirTags"),
+                                                             ("4A:00:00:00:00:63", "AirTag", "Apple AirTags"),
+                                                             ("4A:00:00:00:00:64", "Ruuvi ABCD", ""),
+                                                             ("4A:00:00:00:00:65", "", "Apple Device")))
+        H.import_bytes("fieldwatch-sit-test.csv", sit.encode(), None, 0, None)
+        d = {x["mac"][-2:]: x for x in self.devices()}
+        self.assertEqual((d["61"]["ident_id"], d["61"]["category"]), ("sit-only", "Unidentified"))
+        self.assertEqual((d["62"]["ident_id"], d["62"]["category"], d["62"]["reclass"], d["62"]["ident_conf"]),
+                         ("findmy-unknown", "Apple device", "Tracker", "low"))
+        self.assertEqual(d["63"]["category"], "Tracker")                     # it says itself that it is a tag
+        self.assertEqual((d["64"]["ident_id"], d["64"]["category"]), ("name-ruuvi", "Sensor"))   # a name is enough
+        self.assertEqual((d["65"]["ident_id"], d["65"]["category"]), ("sit-only", "Apple device"))
+        self.assertEqual(H._wb_tab(d["61"], False), "nodata")
+        self.assertIsNone(H._wb_tab(d["65"], False))
+        # the same radio in the log too: the advertisement decides
+        H.import_bytes("log.csv", log_csv([log_row(T0, "BLE", "4A:00:00:00:00:61", "", -70, "", "", "020106")]), None, 0, None)
+        self.assertEqual(self.device("4A:00:00:00:00:61")["ident_id"], "no-data")
+
+    def test_hole_in_the_log(self):
+        """The Sit kept hearing new radios for 20 minutes; the log has rows only for the last five."""
+        sit = [{"src": "sit", "collector_id": 1, "kind": "BLE", "ts": T0 + i * 20_000, "last_ts": T0 + i * 20_000 + 3000} for i in range(60)]
+        log = [{"src": "log", "collector_id": 1, "kind": "BLE", "ts": T0 + 15 * MIN + i * 10_000} for i in range(30)]
+        holes = H.log_holes(sit + log)
+        self.assertEqual(len(holes), 1)
+        self.assertEqual((holes[0]["from"], holes[0]["collector"]), (T0, 1))
+        self.assertAlmostEqual((holes[0]["to"] - holes[0]["from"]) / MIN, 15, delta=0.5)
+        self.assertEqual(holes[0]["sit"], 44)                                # radios first heard inside the hole
+        whole = [{"src": "log", "collector_id": 1, "kind": "BLE", "ts": T0 + i * 20_000} for i in range(60)]
+        self.assertEqual(H.log_holes(sit + whole), [])
+        self.assertEqual(H.log_holes(sit[:5] + log), [])                     # a few radios in a quiet place: no hole
+        self.assertEqual(H.log_holes(log), [])
 
     def test_both_raw_forms_end_up_the_same(self):
         """The same radios logged by Fieldwatch 1.1.42 and by 1.1.43 must look the same."""
@@ -724,6 +786,35 @@ class Travel(TempStore):
         self.assertEqual(d[road]["travel"], "road")
         self.assertAlmostEqual(d[road]["travel_km"], 2.0, delta=0.1)
         self.assertEqual(d[home]["travel"], "")
+
+    def test_the_sit_fills_a_hole_in_the_track(self):
+        """Fieldwatch can lose a part of its log. A Sit row of a radio heard only for a moment tells where
+        the phone was then; such rows make the track where the log has none, and only there."""
+        passed = "".join(f"WIFI,02:00:00:00:0C:{i:02X},,{self.iso(sec)},{self.iso(sec + 2)},1,-80,-80,,"
+                         f"{self.where(sec)[0]},{self.where(sec)[1]}\n" for i, sec in enumerate(range(0, 900, 20)))
+        both, road, home = "4A:00:00:00:00:51", "4A:00:00:00:00:52", "4A:00:00:00:00:53"
+        sit = self.SIT_HEAD + passed + "".join(
+            f"BLE,{mac},,{self.iso(a)},{self.iso(b)},{hits},-60,-90,,60.0,25.0\n"
+            for mac, a, b, hits in ((both, 120, 1300, 200),        # first heard at A, last heard at B
+                                    (road, 300, 840, 40),          # at A, and last heard 2.7 km up the road
+                                    (home, 60, 500, 90)))          # only at A
+        late = [r for r in self.day() if int(r.split(",")[0]) >= T0 + 900_000]     # the log has only the stay at B
+        H.import_bytes("log.csv", log_csv(late), None, 0, None)
+        H.import_bytes("fieldwatch-sit-test.csv", sit.encode(), None, 0, None)
+        with H.db() as con:
+            hears = H.query_hears(con, None, None, ids=H.all_active_ids(con))
+        ph = list(H.phone_stops(hears).values())[0]
+        self.assertEqual([s["place"] for s in ph["stops"]], [1, 2])
+        self.assertEqual(ph["from_sit"], 42)                        # not the three within a minute of the log
+        d = {x["mac"]: x for x in H.build_devices(hears)}
+        self.assertEqual((d[both]["travel"], d[both]["travel_stops"]), ("stops", 2))
+        self.assertEqual(d[road]["travel"], "road")                 # one far sighting is enough for a Sit row
+        self.assertEqual(d[home]["travel"], "")
+        # with the whole log the track is the log's own
+        H.import_bytes("log2.csv", log_csv(self.day()), None, 0, None)
+        with H.db() as con:
+            hears = H.query_hears(con, None, None, ids=H.all_active_ids(con))
+        self.assertEqual(list(H.phone_stops(hears).values())[0]["from_sit"], 0)
 
     def walk(self):
         """Six minutes on foot, 330 m north, without a stop."""

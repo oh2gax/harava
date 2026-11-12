@@ -69,6 +69,26 @@ From the data check of an 11 Nov drive (23 km): "travelled with you" marked 57 a
   Unidentified; the Workbench keeps it on the *No data* tab).
 - Tests: 7 more (rules of the road, iBeacon, empty advertisement, Sit times on the track, short
   walk, companion, the companion rule), 73 in all.
+- **Holes of the log** (after the data check of 12 Nov: Fieldwatch 1.1.43 restarts its part counter
+  at 0 at every start and deletes the next part, `LogStore.kt`; 39 minutes of a Sit had no log).
+  `log_holes()`: stretches of at least 3 min where a Sit first heard `LOG_HOLE_MIN_SIT` (10) radios
+  or more and the log has no rows. `/api/timeline` returns `log_holes`; the pages draw red bands
+  and the note *⚠ No log for N min of the Sit* (`logHoleNote()`, `BT_GAP_PLUGIN`).
+- **Track from the Sit.** `phone_stops()` adds Sit rows of radios heard for `SIT_FIX_MS` (5 s) or
+  less as track points where the log has no point within `TRACK_HOLE_MS` (60 s); `from_sit` tells
+  how many. Against the log: median error 0 m, 90 % within 20 m. 12 Nov: 2 → 3 stops, `road`
+  10 → 24; days with a whole log keep their track.
+- `travel_of()`: one far sighting is enough for a Sit row first heard at a stop, when the stretch
+  of road it falls in lasts `ROAD_MIN_S` or more (a Sit row has only two moments).
+- **`sit-only`**, a built-in identification for a Bluetooth radio that only a Sit export has and
+  no rule names: *Heard only in a Sit: no advertisement to read*, no layer. Workbench tab *No data*.
+- **Identification database `2026-11-12.3`, 85 rules** (9 new): `name-tachograph-vdo`,
+  `name-saphe`, `name-swipbox`, `name-sierzega`, `name-grundfos`, `name-pindora`, `name-oclean`,
+  `name-casambi-bdw` (after `casambi`, for radios without data), `phone-link-iphone` (Apple data +
+  service 3E1D50CD-…, before `windows-3e1d`). More names in `name-audio`, `name-wearable`,
+  `name-obd`, `name-teltonika`.
+- Tests: 5 more (rules of 12 Nov, the iPhone with a Windows service, a radio only in a Sit, hole
+  in the log, the Sit fills a hole in the track), 78 in all.
 
 ### Fixed
 - **Different devices were joined by name.** Addresses sharing a custom service UUID and a name
@@ -77,6 +97,9 @@ From the data check of an 11 Nov drive (23 km): "travelled with you" marked 57 a
   top two bits 01) are joined now; static and public addresses stay apart.
 - With *Group same device* on, a group showed the spread of its loudest address; it now shows the
   spread of all its addresses.
+- `findmy-unknown` (Fieldwatch's AirTag signature on a radio without an advertisement) was on the
+  Tracker layer; it is on Apple device with low confidence. 12 Nov: Tracker 191 → 41.
+- `windows-3e1d` called 15 Apple radios Windows PCs (see `phone-link-iphone`).
 - An iBeacon frame (company 004C, data `02 15`) was *Apple device*; it is `ibeacon` on the Beacon
   layer, since the company number is part of the format (Teslas send it, and stay on the Vehicle
   layer by Fieldwatch's signature).
@@ -86,8 +109,10 @@ From the data check of an 11 Nov drive (23 km): "travelled with you" marked 57 a
   paused* note was shown; it is one piece of text now.
 
 ### Changed
-- User guide 1.7 (Travelled rewritten, the Sit and short walks, *Always with me*; one device, many
-  addresses), Mobile guide 1.6, README, `config.ini.example` (what `travel_min_m` now means).
+- Map cursor: `.leaflet-grab, .leaflet-interactive { cursor: crosshair }` in `app.css` (desktop page and
+  phone app); Leaflet's grabbing cursor while dragging is kept (asked by the user).
+- User guide 1.8 (Travelled rewritten, the Sit and short walks, *Always with me*; one device, many
+  addresses; the Fieldwatch log defect and *No log*), Mobile guide 1.7, README, `config.ini.example` (what `travel_min_m` now means).
   Guide figures `g_selected`, `g_detail` and `m_day` retaken with the new tags.
 
 ---

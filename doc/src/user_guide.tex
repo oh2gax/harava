@@ -26,6 +26,7 @@
 \DeclareUnicodeCharacter{FF0B}{+}
 \DeclareUnicodeCharacter{25C0}{\ensuremath{\blacktriangleleft}}
 \DeclareUnicodeCharacter{25B6}{\ensuremath{\blacktriangleright}}
+\DeclareUnicodeCharacter{26A0}{\ensuremath{\triangle}}%  ⚠
 \DeclareUnicodeCharacter{25A8}{\tikz[baseline=-0.6ex,line width=0.45pt]{\draw (-0.1,-0.1) rectangle (0.1,0.1); \clip (-0.1,-0.1) rectangle (0.1,0.1); \foreach \d in {-0.15,-0.05,0.05,0.15}{\draw (\d-0.1,-0.1)--(\d+0.1,0.1);}}}%  ▨ hatched (Bluetooth paused)
 \usepackage[hidelinks]{hyperref}
 
@@ -42,7 +43,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\itshape Harava --- what your phone heard, raked together}
-\fancyhead[R]{\small\itshape User guide, version 1.7 --- November 2026}
+\fancyhead[R]{\small\itshape User guide, version 1.8 --- November 2026}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \hypersetup{pdftitle={Harava - User guide},pdfauthor={Otso Laakso, OH2GAX}}
@@ -63,7 +64,7 @@
 \begin{document}
 \thispagestyle{plain}
 \begin{center}
-{\small Harava project \quad$\cdot$\quad User guide, version 1.7 \quad$\cdot$\quad 12 November 2026}\par\vspace{10pt}
+{\small Harava project \quad$\cdot$\quad User guide, version 1.8 \quad$\cdot$\quad 12 November 2026}\par\vspace{10pt}
 {\LARGE\bfseries Harava}\par\vspace{5pt}
 {\large\bfseries How to collect with Fieldwatch and read what your phone heard:\\ import, map, devices, layers and the classroom phone check}\par\vspace{8pt}
 {\normalsize Otso Laakso (OH2GAX)}\par
@@ -145,6 +146,8 @@ Gives Harava & the timeline, the path, the signal chart, the Phone check & the c
 Share or save the files and copy them into the \texttt{data} folder of the Harava project on your computer (sub-folders are fine, e.g.\ \texttt{data\textbackslash kml}). KML exports can be imported too, but CSV carries more. The \texttt{data} folder is never committed to git: your exports contain real addresses and your locations.
 
 \warnbox{Why both?}{The Fieldwatch log writes at most 16 rows per scan and writes a radio again only at every 25th hear. In a crowded place --- a classroom, a shopping centre, a busy street --- a gadget that is heard for only a few seconds can be left out of the log altogether. The Sit keeps every radio. With both, Harava shows the timeline from the log \emph{and} marks the radios that only the Sit caught (\ui{sit only}).}
+
+\warnbox{Fieldwatch can lose a part of its log.}{Fieldwatch 1.1.43 keeps its log in parts and forgets, each time the app starts, which part it was writing. Once the first part is full, every start deletes the part that holds the session before it --- also when the app restarts in the middle of a Sit. On 12 November the author lost 39 minutes of the log that way. Until Fieldwatch mends this: set \ui{Settings $\rightarrow$ Rotate at} to 4096\,KB, export and import the log after every session, and then clear it in Fieldwatch (\ui{Reports $\rightarrow$ Reset / clear log}), so that its first part never fills. The Sit is not affected; Harava tells you when the log has such a hole (Section~\ref{sec:timeline}).}
 
 \warnbox{Keep the screen on for Bluetooth.}{When the phone's screen goes dark, many phones --- Samsung above all --- \emph{park the Bluetooth scan}, while Wi-Fi scanning goes on. A Sit does not help: it is the same scan. In the author's logs of 8--9 November Bluetooth was paused for 70--80\,\% of the time, because the screen was switched off while Fieldwatch ran. For a walk, a drive or a Sit where Bluetooth matters, keep Fieldwatch in front with its \ui{Keep screen on} setting (dim the screen, carry a power bank), and give Fieldwatch \ui{Allow background usage} and \ui{Unrestricted} battery. Harava shows on the timeline where Bluetooth was paused (Section~\ref{sec:timeline}).}
 
@@ -301,6 +304,8 @@ The bars count the hears in each 10-minute step (each hour or day when you look 
 \fig{g_timeline_trk.jpg}{0.95}{The same day with \ui{Tracker only}: when the trackers were heard.}
 
 \lead{Bluetooth paused.} An amber band over the graph marks a stretch of at least 3 minutes where the log has Wi-Fi rows but no Bluetooth rows: the phone had parked its Bluetooth scan, usually because the screen was off (Section~\ref{sec:collect}). Bluetooth radios there were \emph{not heard} --- an empty stretch does not mean that nothing was there. The note in the title, \ui{▨ Bluetooth paused \dots}, gives the total and its share of the time the log was running; hover over it for details, and over a bar for the times of the stretch. Stretches where Wi-Fi stopped too (the phone or the log was off) are not marked. With two phones, each phone is judged on its own data. The bands always count all radios, also when \ui{Show} limits the graph to one layer.
+
+\lead{No log.} A red band, and \ui{⚠ No log for \dots\ of the Sit} in the title, mark a stretch where a Sit kept hearing new radios but the log has no rows at all: that part of the log is missing (Section~\ref{sec:collect}). The radios heard there are known from the Sit alone. A Sit export has no advertisement data, so Harava can identify them only by name or by Fieldwatch's own signature: their panel says \emph{Heard only in a Sit: no advertisement to read}, and a Find My radio among them cannot be told to be a tag or a phone. Hover over the note for the times and the number of radios.
 
 \fig{g_timeline_bt.jpg}{0.95}{8 November 2026 with the Bluetooth pauses: the screen was switched off most of the day while Fieldwatch ran, and Bluetooth was paused for 80\,\% of the logged time --- only the narrow gaps between the bands had Bluetooth.}
 
@@ -516,7 +521,9 @@ The data, the CSV export and the database are not changed, and \ui{Add} in My de
 \end{itemize}
 A radio you only passed gets no tag, however far apart the two sightings were: at 100\,km/h half a kilometre takes 18 seconds. The addresses of one device are judged together, so a phone or a watch that changed its address five times on the way is one device that travelled, not five that did not.
 
-\lead{The Sit counts too.} A Sit export tells only when a radio was first and last heard, not where. Harava places both moments on your phone's own track from the log of the same time, so a device the Sit heard at the start and at the end of a drive is judged like the others. The log holds only about a tenth of what the Sit hears, so this finds more.
+\lead{The Sit counts too.} A Sit export tells only when a radio was first and last heard, not where. Harava places both moments on your phone's own track from the log of the same time, so a device the Sit heard at the start and at the end of a drive is judged like the others. The log holds only about a tenth of what the Sit hears, so this finds more. A device the Sit first heard at a stop and last heard a kilometre down the road is tagged \emph{same road} too.
+
+\lead{When the log has a hole.} Your track comes from the log. Where the log has no rows for a minute or more, Harava takes the track from the Sit: a Sit row of a radio heard for five seconds or less carries the place where your phone was at that moment (compared with the log where both exist, it is within 20\,m nine times out of ten). So the stops and the travel tags hold also for the part of a Sit whose log was lost.
 
 \lead{A short walk.} A walk of a few hundred metres has no two stops 500\,m apart and no kilometre of road. A Bluetooth device that was heard at $-80$\dBm\ or stronger at least four times, over at least five minutes and 250\,m of your way, is therefore also tagged \emph{same road}; its panel says \emph{Beside you for 17 min while you moved 300\,m}.
 
@@ -531,7 +538,7 @@ On 8 November two radios were \emph{at stops}: a D-Link 4G router (about $-70$\d
 \item \textbf{Apple device (Find My)} and \textbf{Apple device, offline (Find My)} --- an iPhone, iPad or Mac; moved to the \emph{Apple device} layer. \emph{Offline} is the full-key message of a device without a network connection (asleep, switched off or lost);
 \item \textbf{AirPods or Beats (Find My)} --- moved to the \emph{Audio} layer;
 \item \textbf{Apple AirTag} and \textbf{Find My accessory or newer AirTag} --- stay on the \emph{Tracker} layer. An accessory is another maker's item with Find My (key finder, bag, bike) or a 2nd-generation AirTag; the message alone cannot tell which;
-\item \textbf{Apple Find My device, kind not known} --- a radio that only a Sit export has: a Sit carries no advertisement, so the byte cannot be read. It stays on the Tracker layer, but most such radios are iPhones too. Run the log together with the Sit.
+\item \textbf{Apple Find My device, kind not known} --- a radio that only a Sit export has: a Sit carries no advertisement, so the byte cannot be read. About nine in ten such radios are iPhones, iPads and Macs, so it is moved to the \emph{Apple device} layer with low confidence; it can still be a tag. A radio that tells the name AirTag stays a tracker. Run the log together with the Sit.
 \end{itemize}
 The radio's panel still shows Fieldwatch's signature, with \emph{layer by Harava} after it. The Find My message of a phone comes from another address than the phone's other messages, and the address changes often: the count of addresses is not a count of phones.
 
@@ -559,7 +566,8 @@ The radio's panel still shows Fieldwatch's signature, with \emph{layer by Harava
 \item The log is thinned (16 rows per scan, every 25th hear); without a Sit, brief radios can be missing.
 \item With the screen off, many phones park the Bluetooth scan; those stretches are marked on the timeline, and Bluetooth radios there were not heard at all.
 \item Signatures and identifications can be wrong in both directions, and one gadget can look like many; Harava groups addresses only when the data proves they belong together.
-\item A Sit export has no hear-by-hear times: Harava draws the timeline and the path from the log.
+\item A Sit export has no hear-by-hear times and no advertisement data: Harava draws the timeline and the path from the log, and can identify a radio that only the Sit has by its name alone.
+\item Fieldwatch can lose a part of its log (Section~\ref{sec:collect}); the timeline marks such a stretch \ui{No log}.
 \item The Phone check is an indicator for a teacher, not proof about a pupil.
 \end{itemize}
 

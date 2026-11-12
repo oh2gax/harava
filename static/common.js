@@ -94,31 +94,48 @@ function btGapNote(tl) {
         (pct != null ? ` = ${pct} % of the time the log was running (${fmtDur(c.logged_ms)}).` : '.');
     return `<span class="bt-gap-note" title="${esc(tip)}">▨ Bluetooth paused ${fmtDur(c.silent_ms)}${pct != null ? ` (${pct} %)` : ''}</span>`;
 }
+// Holes of the log inside a Sit (/api/timeline → log_holes): the Sit heard new radios, the log has no rows.
+const LOG_HOLE_TITLE = 'Stretches where a Sit kept hearing new radios but the log has no rows: that part of the log is ' +
+    'missing. Radios heard there are known from the Sit alone. A Sit export has no advertisement data, so Harava can ' +
+    'identify them by name only, and it cannot tell an AirTag from an iPhone. Fieldwatch 1.1.43 deletes a part of its ' +
+    'log each time the app starts: in Fieldwatch set "Rotate at" to 4096 KB (Settings), and after each import clear its log ' +
+    '(Reports, "Reset / clear log").';
+function logHoleNote(tl) {
+    const g = (tl && tl.log_holes) || [];
+    if (!g.length) return '';
+    const ms = g.reduce((a, x) => a + (x.to - x.from), 0), n = g.reduce((a, x) => a + x.sit, 0);
+    const tip = `${LOG_HOLE_TITLE}\n\n` + g.map(x => `${fmtTime(x.from).slice(0, 5)}–${fmtTime(x.to).slice(0, 5)}: ${x.sit} radios first heard${x.phone ? ' (' + x.phone + ')' : ''}`).join('\n');
+    return `<span class="log-hole-note" title="${esc(tip)}">⚠ No log for ${fmtDur(ms)} of the Sit (${n} radios)</span>`;
+}
 function btGapsIn(tl, t0, t1) { return ((tl && tl.bt_gaps) || []).filter(g => g.to > t0 && g.from < t1); }
 function btGapFooter(tl, binIndex) {
     const b = tl && tl.bins[binIndex];
     if (!b) return '';
+    const holes = (tl.log_holes || []).filter(g => g.to > b.t && g.from < b.t + tl.bin_ms).map(g =>
+        `No log ${fmtTime(g.from).slice(0, 5)}–${fmtTime(g.to).slice(0, 5)}: from the Sit alone${g.phone ? ' (' + g.phone + ')' : ''}`);
     return btGapsIn(tl, b.t, b.t + tl.bin_ms).map(g =>
-        `Bluetooth paused ${fmtTime(g.from).slice(0, 5)}–${fmtTime(g.to).slice(0, 5)}${g.phone ? ' (' + g.phone + ')' : ''}`).join('\n');
+        `Bluetooth paused ${fmtTime(g.from).slice(0, 5)}–${fmtTime(g.to).slice(0, 5)}${g.phone ? ' (' + g.phone + ')' : ''}`).concat(holes).join('\n');
 }
 // Chart.js plugin: shades the stretches under the bars. Options: plugins.btGaps = { tl, color }.
 const BT_GAP_PLUGIN = {
     id: 'btGaps',
     beforeDatasetsDraw(chart, args, opts) {
         const tl = opts && opts.tl;
-        if (!tl || !tl.bins || !tl.bins.length || !(tl.bt_gaps || []).length) return;
+        if (!tl || !tl.bins || !tl.bins.length || !((tl.bt_gaps || []).length + (tl.log_holes || []).length)) return;
         const x = chart.scales.x, area = chart.chartArea, ctx = chart.ctx;
         const t0 = tl.bins[0].t, t1 = tl.bins[tl.bins.length - 1].t + tl.bin_ms;
         const px = t => x.left + (Math.min(Math.max(t, t0), t1) - t0) / (t1 - t0) * (x.right - x.left);
         ctx.save();
-        for (const g of tl.bt_gaps) {
+        const band = (g, color) => {
             const a = px(g.from), b = px(g.to);
-            if (b - a < 0.5) continue;
-            ctx.globalAlpha = 0.15; ctx.fillStyle = opts.color || '#f59e0b';
+            if (b - a < 0.5) return;
+            ctx.globalAlpha = 0.15; ctx.fillStyle = color;
             ctx.fillRect(a, area.top, b - a, area.bottom - area.top);
             ctx.globalAlpha = 0.8;
             ctx.fillRect(a, area.top, Math.max(b - a, 1), 3);
-        }
+        };
+        for (const g of tl.bt_gaps || []) band(g, opts.color || '#f59e0b');
+        for (const g of tl.log_holes || []) band(g, opts.holeColor || '#ef4444');   // no log at all: red
         ctx.restore();
     },
 };

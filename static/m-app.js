@@ -499,7 +499,7 @@
     $('m-tl-t').textContent = `Hears per ${bin || '10 min'}`;
     $('m-tl-sub').textContent = O.tlcat ? O.tlcat + ' only' : '';
     $('m-tl-note').innerHTML = [O.tlcat ? (tl.hears ? `${tl.hears} hear(s)` : '<span style="color:var(--amber)">none heard</span>') : '',
-      tl.sit_only ? `${tl.sit_only} only in Sit` : '', btGapNote(tl)].filter(Boolean).join(' · ');
+      tl.sit_only ? `${tl.sit_only} only in Sit` : '', btGapNote(tl), logHoleNote(tl)].filter(Boolean).join(' · ');
     const labels = tl.bins.map(b => { const d = new Date(b.t); return tl.bin_ms >= 86400000 ? `${pad(d.getDate())}.${pad(d.getMonth() + 1)}` : `${pad(d.getHours())}:${pad(d.getMinutes())}`; });
     const ax = axis();
     mkChart('m-tl-c', {

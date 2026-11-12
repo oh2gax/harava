@@ -444,7 +444,7 @@ function drawTimeline() {
     $('tlNote').innerHTML = [
         S.tlCat ? (tl.hears ? `${tl.hears} hear(s)` : `<span style="color:var(--amber)">none heard in this range</span>`) : '',
         tl.sit_only ? `<span title="Radios that only the Sit export has (the log missed them). They are counted once, when first heard.">${tl.sit_only} only in Sit</span>` : '',
-        btGapNote(tl),
+        btGapNote(tl), logHoleNote(tl),
     ].filter(Boolean).join(' · ');
     $('timelinePanel').classList.toggle('tl-filtered', !!S.tlCat);
     const withDate = tl.bin_ms >= 86400000 || wideRange();

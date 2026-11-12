@@ -1403,9 +1403,20 @@ FINDMY_IDENTS = {
         "note": "A Find My message from earbuds or headphones: the status byte says \"AirPods\", or the same "
                 "advertisement also carries Apple's pairing message for audio devices."},
     "findmy-unknown": {
-        "name": "Apple Find My device, kind not known", "layer": "Tracker", "confidence": "medium",
+        "name": "Apple Find My device, kind not known", "layer": "Apple device", "confidence": "low",
         "note": "Fieldwatch's AirTag signature matched, but there is no advertisement data to tell the kind of "
-                "device (a Sit export has none). Most such radios are iPhones, iPads and Macs, not tags."},
+                "device (a Sit export has none). About nine in ten such radios are iPhones, iPads and Macs, "
+                "so it is counted as an Apple device and not as a tracker; it can still be a tag."},
+}
+# A radio that only a Sit export has: Fieldwatch writes no advertisement into a Sit, so there is nothing
+# for Harava's rules to read. Said in so many words, so that it is not taken for an unknown device.
+SIT_ONLY_IDENT = {
+    "id": "sit-only", "name": "Heard only in a Sit: no advertisement to read", "layer": "", "confidence": "high",
+    "note": "This radio is in a Sit export but not in the log. A Sit export carries the name and Fieldwatch's "
+            "own signature, but no advertisement data, so Harava's rules have nothing to read. Either the log "
+            "of that time is missing (Fieldwatch deletes a part of its log whenever it starts; the timeline "
+            "then says \"No log\"), or the log skipped this radio.",
+    "company": "", "group": "",
 }
 
 
@@ -1648,6 +1659,8 @@ STOP_MIN_S = 300             # ... for at least this long
 PLACE_JOIN_M = 250           # two stops this close are the same place (home in the morning and at noon)
 ROAD_MIN_S = 120             # "same road": heard over at least this long while moving ...
 ROAD_FACTOR = 2              # ... and over at least this many times travel_min_m
+SIT_FIX_MS = 5000            # a Sit row of a radio heard no longer than this tells where the phone was then
+TRACK_HOLE_MS = 60000        # the log's track has a hole where it has no point for this long
 
 
 def find_stops(points):
@@ -1684,17 +1697,34 @@ def find_stops(points):
 
 def phone_stops(hears):
     """The stops of every phone in these hears: {collector_id: {"stops", "starts", "track", "times"}}.
-    Sit rows carry one position for a whole sitting, so only rows with a time and a place of their
-    own make the track."""
-    tracks = defaultdict(list)
+    The track is made of the log rows: each has a time and a place of its own. A Sit row has one
+    place for a radio's whole sitting, but for a radio heard only for a moment that place is where
+    the phone was at that moment (measured against the log: within 20 m nine times out of ten). Such
+    rows fill the track where the log has a hole: Fieldwatch can lose part of its log (it deletes a
+    part of it at every start), the Sit of the same time is whole."""
+    tracks, fixes = defaultdict(list), defaultdict(list)
     for h in hears:
-        if h["src"] != "sit" and h["ts"] and h["lat"] is not None and h["lon"] is not None:
+        if not h["ts"] or h["lat"] is None or h["lon"] is None:
+            continue
+        if h["src"] != "sit":
             tracks[h.get("collector_id")].append((h["ts"], h["lat"], h["lon"]))
+        elif (h.get("last_ts") or h["ts"]) - h["ts"] <= SIT_FIX_MS:
+            fixes[h.get("collector_id")].append((h["ts"], h["lat"], h["lon"]))
     out = {}
-    for c, t in tracks.items():
-        t.sort()
+    for c in set(tracks) | set(fixes):
+        t = sorted(tracks.get(c, []))
+        times = [p[0] for p in t]
+        extra = []
+        for p in fixes.get(c, []):
+            i = bisect.bisect_left(times, p[0])
+            near = min((abs(times[k] - p[0]) for k in (i - 1, i) if 0 <= k < len(times)), default=None)
+            if near is None or near > TRACK_HOLE_MS:
+                extra.append(p)
+        if extra:
+            t = sorted(t + extra)
         sts = find_stops(t)
-        out[c] = {"stops": sts, "starts": [s["from"] for s in sts], "track": t, "times": [p[0] for p in t]}
+        out[c] = {"stops": sts, "starts": [s["from"] for s in sts], "track": t, "times": [p[0] for p in t],
+                  "from_sit": len(extra)}
     return out
 
 
@@ -1729,6 +1759,7 @@ def travel_of(hs, stops):
     first and last heard: two sightings, placed on the phone's own track."""
     far = CFG["travel_min_m"]
     at, moving, strong = {}, defaultdict(list), []   # place -> sightings; stretch of road -> sightings
+    sit_far = []                                  # Sit sightings on a real stretch of road (see below)
     empty = {"stops": [], "starts": [], "track": [], "times": []}
     for h in hs:
         if not h["ts"]:
@@ -1751,6 +1782,12 @@ def travel_of(hs, stops):
                     if not pos:
                         continue
                     lat, lon = pos
+                    # the stretch of road it falls in: from the stop before it to the stop after it
+                    # (a GPS jump in the middle of a stop makes a "stretch" of a few seconds: not counted)
+                    t0 = ph["stops"][k]["to"] if k >= 0 else (ph["times"][0] if ph["times"] else ts)
+                    t1 = ph["stops"][k + 1]["from"] if k + 1 < len(ph["stops"]) else (ph["times"][-1] if ph["times"] else ts)
+                    if t1 - t0 >= ROAD_MIN_S * 1000:
+                        sit_far.append((ts, lat, lon))
                 moving[(h.get("collector_id"), k)].append((ts, lat, lon))   # k = the stop before this stretch
             if h["kind"] == "BLE" and h["src"] != "sit" and (h["rssi"] or -999) >= BESIDE_RSSI:
                 strong.append((ts, lat, lon))
@@ -1781,8 +1818,12 @@ def travel_of(hs, stops):
     if best is None and cents:                    # at a stop, and heard again far from it on the way
         away = [(min(haversine_m(c[0], c[1], p[1], p[2]) for c in cents), p[0]) for run in moving.values() for p in run]
         away = [(d, t) for d, t in away if d >= ROAD_FACTOR * far]
-        # (twice, half a minute apart: one row with a wrong GPS fix must not send a neighbour travelling)
-        if len(away) >= 2 and max(t for _d, t in away) - min(t for _d, t in away) >= 30000:
+        # (twice, half a minute apart: one row with a wrong GPS fix must not send a neighbour travelling.
+        #  A Sit row gives only its first and last moment, so there one is enough, when the phone's own
+        #  track shows that it really was on the road then)
+        sure = {p[0] for p in sit_far if min(haversine_m(c[0], c[1], p[1], p[2]) for c in cents) >= ROAD_FACTOR * far}
+        if (len(away) >= 2 and max(t for _d, t in away) - min(t for _d, t in away) >= 30000) or \
+                any(t in sure for _d, t in away):
             ts = [t for _d, t in away] + [t for v in at.values() for _s, t in v]
             best = (max(d for d, _t in away), (max(ts) - min(ts)) / 1000)
     if best is None and len(strong) >= 4:         # beside you on a short way, on foot
@@ -1855,6 +1896,8 @@ def build_devices(hears, stops=None):
                 # (the class stays a Fieldwatch class: Fieldwatch did name this radio, only too broadly)
                 cls, cat = (cls2, cat2) if cat2 != "Unidentified" else \
                     ({"Apple device": "PHONE", "Audio": "AUDIO"}.get(hv["layer"], "HARAVA"), hv["layer"])
+        if hv is None and kind == "BLE" and sit_hs and not log_hs:
+            hv = SIT_ONLY_IDENT
         if hv and hv["layer"] and (cat == "Unidentified" or (kind == "WIFI" and not fleet_s)):
             # Harava's own database identified it (a Wi-Fi network without a signature is only
             # "Network" for want of anything better: a rule may say it is a TV's or a printer's own)
@@ -2620,6 +2663,41 @@ BT_GAP_MIN_WIFI = 3                # Wi-Fi rows needed inside a stretch to show 
 BT_GAP_JOIN_MS = 60000             # stretches this close are one (a restart can let a few rows through)
 
 
+LOG_HOLE_MIN_SIT = 10              # radios the Sit first heard inside a hole of the log, to call it one
+
+
+def log_holes(hears):
+    """Stretches where a Sit kept hearing new radios but the log has no rows at all: that part of the
+    log is missing (Fieldwatch deletes a part of its log at every start). Normally the log has a row
+    of its own for nearly every radio a Sit hears for the first time. Per phone; returns
+    [{"from", "to", "sit", "collector"}], sit = the radios first heard there. Those radios are known
+    from the Sit alone: no advertisement, so no identification beyond the name and Fieldwatch's own
+    signature."""
+    per = defaultdict(lambda: ([], []))
+    for h in hears:
+        sit, log = per[h.get("collector_id") or 0]
+        (sit if h["src"] == "sit" else log).append(h["ts"])
+    out = []
+    for cid, (sit, log) in per.items():
+        if len(sit) < LOG_HOLE_MIN_SIT:
+            continue
+        sit.sort(); log.sort()
+        runs, start, prev = [], sit[0], sit[0]    # the stretches where the Sit kept hearing something new
+        for t in sit[1:]:
+            if t - prev > BT_GAP_HOLE_MS:
+                runs.append((start, prev))
+                start = t
+            prev = t
+        runs.append((start, prev))
+        for r0, r1 in runs:
+            edges = [r0] + log[bisect.bisect_right(log, r0):bisect.bisect_left(log, r1)] + [r1]
+            for a, b in zip(edges, edges[1:]):
+                n = bisect.bisect_left(sit, b) - bisect.bisect_right(sit, a)
+                if b - a >= BT_GAP_MIN_MS and n >= LOG_HOLE_MIN_SIT:
+                    out.append({"from": a, "to": b, "sit": n, "collector": cid})
+    return sorted(out, key=lambda g: g["from"])
+
+
 def bluetooth_gaps(hears):
     """Stretches where the log has Wi-Fi rows but no Bluetooth rows, per phone.
     Returns ({"from", "to", "wifi", "collector"} list, logged_ms per collector)."""
@@ -2678,6 +2756,7 @@ def api_timeline():
     bt_gaps = [dict(g, phone=names.get(g["collector"], "") if several else "") for g in gaps]
     bt_cov = {"silent_ms": sum(g["to"] - g["from"] for g in gaps), "logged_ms": sum(logged.values()),
               "min_gap_ms": BT_GAP_MIN_MS}
+    holes = [dict(g, phone=names.get(g["collector"], "") if several else "") for g in log_holes(hears)]
     all_lo = hears[0]["ts"] if hears else None
     all_hi = hears[-1]["ts"] + 1 if hears else None
     if cat:
@@ -2692,7 +2771,7 @@ def api_timeline():
     lo = t_from or all_lo
     hi = t_to or all_hi
     if lo is None or hi is None:
-        return jsonify({"bin_ms": 0, "bins": [], "cat": cat, "hears": 0, "bt_gaps": [], "bt_cov": bt_cov})
+        return jsonify({"bin_ms": 0, "bins": [], "cat": cat, "hears": 0, "bt_gaps": [], "bt_cov": bt_cov, "log_holes": []})
     span = hi - lo
     bin_ms = 600000 if span <= 2 * 86400000 else (3600000 if span <= 14 * 86400000 else 86400000)
     start = lo - lo % bin_ms
@@ -2713,7 +2792,7 @@ def api_timeline():
         out.append({"t": t, **v})
         t += bin_ms
     return jsonify({"bin_ms": bin_ms, "bins": out, "cat": cat, "hears": len(hears), "sit_only": sit_only,
-                    "bt_gaps": bt_gaps, "bt_cov": bt_cov})
+                    "bt_gaps": bt_gaps, "bt_cov": bt_cov, "log_holes": holes})
 
 
 @app.route("/api/device")
@@ -3300,7 +3379,7 @@ def _fingerprint(d):
 def _wb_tab(d, data):
     if d["kind"] != "BLE":
         return None
-    if d["ident_id"] == "no-data":           # only flags or the power: nothing a rule could read
+    if d["ident_id"] in ("no-data", "sit-only"):   # nothing a rule could read
         return "nodata" if d["category"] == "Unidentified" else None
     if d["ident_id"] in ("company", "custom-uuid") or (d["ident_id"] and d["ident_conf"] == "low"):
         return "weak"

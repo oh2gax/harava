@@ -1,6 +1,6 @@
 {
   "name": "Harava identification database",
-  "version": "2026-11-12.2",
+  "version": "2026-11-12.3",
   "description": "Harava's own rules for radios that Fieldwatch's signatures leave unidentified. Rules are tried in order; the first that matches wins. A rule only changes the layer of a radio that Fieldwatch did not identify; for the others it adds the 'Identified as' text. Company names come from bt_assigned_numbers.json (Bluetooth SIG).",
   "schema": {
     "match (all given conditions must hold)": {
@@ -210,7 +210,7 @@
       "confidence": "medium",
       "match": {
         "kind": "BLE",
-        "name_regex": "buds|airpods|beats|\\bjbl\\b|bose|soundlink|tune \\d|wh-1000|wf-1000|jabra|sennheiser|marshall|\\bear\\b|epos|\\bhd \\d{3}bt|voyager|jlab|soundcore|\\bdime\\d"
+        "name_regex": "buds|airpods|beats|\\bjbl\\b|bose|soundlink|tune \\d|wh-1000|wf-1000|jabra|sennheiser|marshall|\\bear\\b|epos|\\bhd \\d{3}bt|voyager|jlab|soundcore|\\bdime\\d|vlegend|momentum \\d|^ult wear|^h/k\\b|^lg-s[a-z]{1,2}\\d"
       }
     },
     {
@@ -220,7 +220,7 @@
       "confidence": "medium",
       "match": {
         "kind": "BLE",
-        "name_regex": "galaxy watch|galaxy fit|fitbit|garmin|amazfit|mi band|polar |suunto|oura|whoop|huawei (band|watch)|honor (band|watch)|watch fit"
+        "name_regex": "galaxy watch|galaxy fit|fitbit|garmin|amazfit|mi band|polar |suunto|oura|whoop|huawei (band|watch)|honor (band|watch)|watch fit|^gear (s\\d|sport|fit)"
       }
     },
     {
@@ -295,7 +295,7 @@
       "confidence": "medium",
       "match": {
         "kind": "BLE",
-        "name_regex": "^(OBDeleven|OBDLink|OBDII|OBD2?|NEXAS\\d|vLinker|V-?LINK|Carista|Veepeak|ELM327|KONNWEI|Vgate)\\b"
+        "name_regex": "^(OBDeleven|OBDLink|OBDII|OBD2?|NEXAS\\d|vLinker|V-?LINK|IOS-Vlink|Carista|Veepeak|ELM327|KONNWEI|Vgate)\\b"
       },
       "note": "By name. A dongle in a car's diagnostic socket that a phone app talks to. It is in a car, and usually stays there."
     },
@@ -306,7 +306,7 @@
       "confidence": "medium",
       "match": {
         "kind": "BLE",
-        "name_regex": "^FM[A-Z]?\\d{3}_\\d+_LE$"
+        "name_regex": "^FM[A-Z]?\\d{3,4}[_:]\\d+_LE$"
       },
       "note": "By name: the model (FMB, FMC, FMM ...), a serial number and _LE, the form Teltonika's fleet trackers use. It is wired into a vehicle by its owner or operator and reports the vehicle's position over the mobile network; it is on the Vehicle layer because it tells of a vehicle nearby, not of something tracking you."
     },
@@ -320,6 +320,17 @@
         "name_regex": "^SE5000-\\d+"
       },
       "note": "By name. The SE5000 is a digital tachograph, the driving-time recorder of a lorry or a bus; newer ones have Bluetooth for the driver's app."
+    },
+    {
+      "id": "name-tachograph-vdo",
+      "name": "VDO DTCO tachograph (lorry or bus)",
+      "layer": "Vehicle",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^DTCO-"
+      },
+      "note": "By name. DTCO is the digital tachograph of VDO (Continental), the driving-time recorder of a lorry or a bus; the newer ones have Bluetooth for the driver's app. Seen only by name, so the confidence is low."
     },
     {
       "id": "name-scooter",
@@ -377,6 +388,17 @@
       "note": "By name. A small beacon kept in a car so that a mileage-log app on the driver's phone knows when a trip starts."
     },
     {
+      "id": "name-saphe",
+      "name": "Saphe traffic alarm (in a car)",
+      "layer": "Vehicle",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Saphe\\b"
+      },
+      "note": "By name. A small box on a car's dashboard that warns of speed cameras and hazards through the driver's phone."
+    },
+    {
       "id": "name-nut",
       "name": "Nut tracker tag",
       "layer": "Tracker",
@@ -397,6 +419,28 @@
         "name_regex": "^SumUp \\d"
       },
       "note": "By name. A payment terminal of a shop, a market stall or a taxi."
+    },
+    {
+      "id": "name-swipbox",
+      "name": "SwipBox parcel locker",
+      "layer": "",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^SwipBox"
+      },
+      "note": "By name. A parcel locker without a screen: its doors are opened over Bluetooth from the carrier's phone app. It stands in one place."
+    },
+    {
+      "id": "name-sierzega",
+      "name": "Sierzega traffic radar or speed display",
+      "layer": "",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Sierzega\\b"
+      },
+      "note": "By name. Sierzega makes roadside radar units that count traffic and show drivers their speed; they are read out over Bluetooth."
     },
     {
       "id": "name-brother-printer",
@@ -443,6 +487,17 @@
       "note": "By name: a circulation pump in a building's heating room."
     },
     {
+      "id": "name-grundfos",
+      "name": "Grundfos pump",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Grundfos"
+      },
+      "note": "By name: a circulation or water pump, usually in a building's heating room, set up with a phone app."
+    },
+    {
       "id": "name-mitsubishi-ac",
       "name": "Mitsubishi Electric air-conditioner adapter",
       "layer": "Home & IoT",
@@ -476,6 +531,28 @@
       "note": "By name: the motor control of an adjustable bed, used with a phone app."
     },
     {
+      "id": "name-pindora",
+      "name": "Pindora smart lock",
+      "layer": "Smart lock",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^PINDORA_"
+      },
+      "note": "By name. A Bluetooth door lock or key box that is opened with a phone."
+    },
+    {
+      "id": "name-oclean",
+      "name": "Oclean electric toothbrush",
+      "layer": "Home & IoT",
+      "confidence": "medium",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^Oclean\\b"
+      },
+      "note": "By name."
+    },
+    {
       "id": "name-ipstube",
       "name": "IPSTube desk clock",
       "layer": "Home & IoT",
@@ -485,6 +562,20 @@
         "name_regex": "^IPSTube_"
       },
       "note": "By name: a desk clock with small displays in place of nixie tubes."
+    },
+    {
+      "id": "phone-link-iphone",
+      "name": "iPhone linked to a Windows PC (Phone Link?)",
+      "layer": "Apple device",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "mfg": "004C",
+        "uuid128_any": [
+          "3E1D50CD-7E3E-427D-8E1C-B78AA87FE624"
+        ]
+      },
+      "note": "Apple manufacturer data together with the 128-bit service 3E1D50CD-7E3E-427D-8E1C-B78AA87FE624, which Windows PCs advertise. So this is an Apple device that sends a Windows service: most likely an iPhone that is linked to a PC with Microsoft's Phone Link. Inferred from what was heard; the service is not documented. These radios tell the name \"4\"."
     },
     {
       "id": "windows-3e1d",
@@ -497,7 +588,7 @@
           "3E1D50CD-7E3E-427D-8E1C-B78AA87FE624"
         ]
       },
-      "note": "Advertises the 128-bit service 3E1D50CD-7E3E-427D-8E1C-B78AA87FE624. Every radio with this service that told a name had a Windows PC name, so it is a Windows service shared by many PCs, not a fingerprint of one PC. Its public meaning is not documented."
+      "note": "Advertises the 128-bit service 3E1D50CD-7E3E-427D-8E1C-B78AA87FE624. Every radio with this service that told a name had a Windows PC name, apart from Apple devices that send it too (probably iPhones linked to a PC; they have a rule of their own before this one). So it is a Windows service shared by many PCs, not a fingerprint of one PC. Its public meaning is not documented."
     },
     {
       "id": "mesh-unprovisioned",
@@ -875,6 +966,17 @@
         "mfg": "03C3"
       },
       "note": "Casambi's company number. Casambi is a Bluetooth lighting-control system built into the lamps, sensors and switches of many makers; the name tells the product."
+    },
+    {
+      "id": "name-casambi-bdw",
+      "name": "Casambi lighting (lamp, sensor or switch)",
+      "layer": "Home & IoT",
+      "confidence": "low",
+      "match": {
+        "kind": "BLE",
+        "name_regex": "^bDW\\b"
+      },
+      "note": "By name, for radios whose advertisement was not stored (a Sit export). Nearly every radio with a name of this form carried Casambi's company number: lamps and sensors of a building's lighting control."
     },
     {
       "id": "serial-module",
